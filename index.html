@@ -313,7 +313,7 @@ const St = {
 /* ══════════ ESTADO ══════════ */
 let S = { vista:"inicio", suc:SUCURSALES[0], etapa:"datos", indice:[], r:null, flota:[] };
 const FOTOS = {};                 // idFoto -> dataURL (cache en memoria)
-const VIDEOS = {};                // idVideo -> objectURL (solo sesión activa)
+                // idVideo -> objectURL (solo sesión activa)
 const uid = ()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const hoy = ()=>new Date().toISOString().slice(0,10);
 const esc = s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -485,7 +485,6 @@ async function subir(slotKey, files, danoId){
     flash(`Procesando ${++hechos} de ${arr.length}…`, true);
     const id=uid();
     if(file.type.startsWith("video")){
-      VIDEOS[id]=URL.createObjectURL(file);
       ARCHIVOS[id]=file;
       const m={id,tipo:"video",nombre:file.name,peso:file.size};
       const th=await miniaturaVideo(file);
@@ -511,7 +510,6 @@ async function quitaArchivo(id){
   delete ARCHIVOS[id];
   await St.del("f:"+id); delete FOTOS[id];
   await St.del("t:"+id); delete THUMBS[id];
-  if(VIDEOS[id]){ URL.revokeObjectURL(VIDEOS[id]); delete VIDEOS[id]; }
 }
 async function quitaMedia(slot,id,danoId){
   const r=S.r;
@@ -519,7 +517,6 @@ async function quitaMedia(slot,id,danoId){
   else r.media[slot]=(r.media[slot]||[]).filter(m=>m.id!==id);
   await St.del("f:"+id); delete FOTOS[id];
   await St.del("t:"+id); delete THUMBS[id];
-  if(VIDEOS[id]){ URL.revokeObjectURL(VIDEOS[id]); delete VIDEOS[id]; }
   await guardaFicha(); pinta(true);
 }
 
@@ -531,7 +528,6 @@ const corta = t => { t=String(t||"").replace(/<[^>]*>/g," ").replace(/\s+/g," ")
   return t.length>180 ? t.slice(0,180)+"…" : t; };
 const ARCHIVOS = {};          // id -> File o Blob pendiente de subir (solo esta sesión)
 const COLA = [];              // trabajos de subida
-let SUBIENDO = false;
 
 async function cargaCfg(){
   const raw = await St.get("cfg");
@@ -571,34 +567,61 @@ function destino(r, slot, danoId, indice){
 
 function encolar(r, slot, danoId, media){
   if(!hayDrive()){ media.estado="local"; return; }
-  COLA.push({ id:media.id, fichaId:r.id, slot, danoId, media });
   media.estado = "pendiente";
+  COLA.push({ id:media.id, fichaId:r.id, slot, danoId, media });
   procesaCola();
 }
 
+let ACTIVAS = 0;
+const MAX_PARALELO = 2;
+
 async function procesaCola(){
-  if(SUBIENDO || !COLA.length || !hayDrive()) return;
-  SUBIENDO = true;
-  while(COLA.length){
-    const t = COLA[0];
-    let ok=false;
-    for(let intento=1; intento<=3 && !ok; intento++){
-      try{
-        t.media.estado = intento>1 ? "reintento" : "subiendo";
-        if(S.r && S.r.id===t.fichaId) pintaSubidas();
-        await subeArchivo(t);
-        t.media.estado="listo"; delete t.media.detalle; ok=true;
-      }catch(e){
-        t.media.detalle = corta(e.message||e);
-        if(intento<3) await new Promise(r=>setTimeout(r, intento*2500));
-      }
-    }
-    if(!ok){ t.media.estado="error"; flash("No se pudo subir: "+t.media.detalle); }
-    COLA.shift();
-    if(S.r && S.r.id===t.fichaId){ pintaSubidas(); guardaFicha(); }
+  if(!hayDrive()) return;
+  while(ACTIVAS < MAX_PARALELO && COLA.some(t=>!t.tomado)){
+    const t = COLA.find(x=>!x.tomado);
+    t.tomado = true; ACTIVAS++;
+    trabaja(t).finally(()=>{
+      ACTIVAS--;
+      const i=COLA.indexOf(t); if(i>=0) COLA.splice(i,1);
+      if(S.r && S.r.id===t.fichaId){ pintaSubidas(); guardaFicha(); }
+      procesaCola();
+    });
   }
-  SUBIENDO = false;
 }
+
+async function trabaja(t){
+  for(let intento=1; intento<=3; intento++){
+    try{
+      t.media.estado = intento>1 ? "reintento" : "subiendo";
+      if(S.r && S.r.id===t.fichaId) pintaSubidas();
+      await subeArchivo(t);
+      t.media.estado="listo"; delete t.media.detalle;
+      return;
+    }catch(e){
+      t.media.detalle = corta(e.message||e);
+      if(intento<3) await new Promise(r=>setTimeout(r, intento*2500));
+    }
+  }
+  t.media.estado="error";
+  flash("No se pudo subir: "+t.media.detalle);
+}
+
+/* PUT con progreso real. XHR permite seguir el avance del envío, fetch no. */
+function enviar(url, blob, rango, onProg){
+  return new Promise((ok,err)=>{
+    const x=new XMLHttpRequest();
+    x.open("PUT", url, true);
+    if(rango) x.setRequestHeader("Content-Range", rango);
+    x.upload.onprogress = e=>{ if(e.lengthComputable) onProg(e.loaded, e.total); };
+    x.onload = ()=>ok({ status:x.status, texto:x.responseText, rango:x.getResponseHeader("Range") });
+    x.onerror = ()=>err(new Error("Se cortó la conexión durante la subida"));
+    x.onabort = ()=>err(new Error("Subida cancelada"));
+    x.send(blob);
+  });
+}
+
+const UMBRAL_TROZOS = 200 * 1024 * 1024;   // bajo esto va de una sola pasada
+const TROZO = 32 * 1024 * 1024;
 
 async function subeArchivo(t){
   const r = S.r && S.r.id===t.fichaId ? S.r : JSON.parse(await St.get("r:"+t.fichaId));
@@ -616,60 +639,38 @@ async function subeArchivo(t){
     carpetaId, nombre, mime: blob.type || "application/octet-stream", tamano: blob.size,
   });
 
-  const TROZO = 8 * 1024 * 1024;
-  let desde = 0, respuesta = null;
-  while(desde < blob.size){
-    const hasta = Math.min(desde + TROZO, blob.size);
-    const res = await fetch(subidaUrl, {
-      method:"PUT",
-      headers:{ "Content-Range": `bytes ${desde}-${hasta-1}/${blob.size}` },
-      body: blob.slice(desde, hasta),
-    });
-    if(res.status === 308){
-      const rango = res.headers.get("Range");
-      desde = rango ? Number(rango.split("-")[1]) + 1 : hasta;
-    } else if(res.ok){
-      respuesta = await res.json().catch(()=>({}));
-      desde = blob.size;
-    } else {
-      throw new Error("Drive respondió "+res.status);
-    }
-    t.media.pct = Math.round(desde / blob.size * 100);
+  const avanza = (hechos)=>{
+    t.media.pct = Math.min(100, Math.round(hechos / blob.size * 100));
     if(S.r && S.r.id===t.fichaId) pintaSubidas();
+  };
+
+  let respuesta = null;
+
+  if(blob.size <= UMBRAL_TROZOS){
+    const res = await enviar(subidaUrl, blob, `bytes 0-${blob.size-1}/${blob.size}`, cargado=>avanza(cargado));
+    if(res.status>=200 && res.status<300) respuesta = JSON.parse(res.texto||"{}");
+    else throw new Error("Drive respondió "+res.status);
+  }else{
+    let desde = 0;
+    while(desde < blob.size){
+      const hasta = Math.min(desde + TROZO, blob.size);
+      const base = desde;
+      const res = await enviar(subidaUrl, blob.slice(desde, hasta),
+        `bytes ${desde}-${hasta-1}/${blob.size}`, cargado=>avanza(base + cargado));
+      if(res.status === 308){
+        desde = res.rango ? Number(res.rango.split("-")[1]) + 1 : hasta;
+      }else if(res.status>=200 && res.status<300){
+        respuesta = JSON.parse(res.texto||"{}");
+        desde = blob.size;
+      }else throw new Error("Drive respondió "+res.status);
+      avanza(desde);
+    }
   }
+
   t.media.driveId = respuesta && respuesta.id || "";
   t.media.pct = 100;
   delete ARCHIVOS[t.id];
-  if(t.media.tipo==="video" && VIDEOS[t.id]){   // ya está en Drive: liberamos la memoria
-    URL.revokeObjectURL(VIDEOS[t.id]); delete VIDEOS[t.id];
-  }
 }
-
-async function carpetaRaiz(){
-  if(CFG.raizId) return CFG.raizId;
-  const { carpetaId } = await api("/carpeta", { ruta:[RAIZ] });
-  CFG.raizId = carpetaId; await guardaCfg();
-  return carpetaId;
-}
-async function carpetaArriendo(r){
-  if(r.driveCarpeta) return r.driveCarpeta;
-  const padreId = await carpetaRaiz();
-  const { carpetaId } = await api("/carpeta", { ruta:[nombreCarpeta(r)], padreId });
-  r.driveCarpeta = carpetaId;
-  if(S.r && S.r.id===r.id) S.r.driveCarpeta = carpetaId;
-  return carpetaId;
-}
-/* Los ids se guardan en la ficha para no volver a buscarlos en cada archivo */
-async function carpetaSub(r, sub){
-  r.driveSubs = r.driveSubs || {};
-  if(r.driveSubs[sub]) return r.driveSubs[sub];
-  const padreId = await carpetaArriendo(r);
-  const { carpetaId } = await api("/carpeta", { ruta:[sub], padreId });
-  r.driveSubs[sub] = carpetaId;
-  if(S.r && S.r.id===r.id){ S.r.driveSubs = S.r.driveSubs||{}; S.r.driveSubs[sub]=carpetaId; }
-  return carpetaId;
-}
-const linkCarpeta = id => id ? `https://drive.google.com/drive/folders/${id}` : "";
 
 /* Sube ficha.json y resumen.txt */
 async function subeDocumentos(r){
@@ -1107,9 +1108,7 @@ function slotHTML(s,r){
 function tiraHTML(m,slot,danoId){
   const cuerpo = m.tipo==="foto"
     ? (FOTOS[m.id]?`<img src="${FOTOS[m.id]}" alt="">`:`<em class="txt">Foto</em>`)
-    : (THUMBS[m.id] ? `<img src="${THUMBS[m.id]}" alt=""><em>Video</em>`
-      : VIDEOS[m.id] ? `<video src="${VIDEOS[m.id]}" muted playsinline preload="metadata"></video><em>Video</em>`
-      : `<em class="txt">Video</em>`);
+    : (THUMBS[m.id] ? `<img src="${THUMBS[m.id]}" alt=""><em>Video</em>` : `<em class="txt">Video</em>`);
   const est = m.estado || (m.driveId ? "listo" : "");
   const marca = est==="listo" ? `<i class="ok">✓</i>`
     : est==="error" ? `<i class="err">!</i>`
@@ -1121,17 +1120,19 @@ function tiraHTML(m,slot,danoId){
 let VISOR=null;
 function verMedia(id,slot,danoId){
   VISOR={id,slot,danoId};
-  const foto=FOTOS[id], video=VIDEOS[id], m=buscaMedia(id);
+  const foto=FOTOS[id], m=buscaMedia(id);
   const cuerpo = foto ? `<img src="${foto}" alt="" style="width:100%;border-radius:4px;display:block">`
-    : video ? `<video src="${video}" controls playsinline style="width:100%;border-radius:4px;display:block;background:#000"></video>`
-    : (m && m.driveId && THUMBS[id]) ? `<img src="${THUMBS[id]}" alt="" style="width:100%;border-radius:4px;display:block">`
+    : THUMBS[id] ? `<img src="${THUMBS[id]}" alt="" style="width:100%;border-radius:4px;display:block">`
     : "";
   const extra = (m && m.driveId && m.tipo==="video")
     ? `<a class="btn wide" style="margin-top:10px;text-decoration:none"
           href="https://drive.google.com/file/d/${m.driveId}/view" target="_blank" rel="noopener">Reproducir en Drive</a>`
     : "";
-  const faltante = (!foto && !video && !(m&&m.driveId))
-      ? `<div class="aviso" style="margin:0"><b>Archivo no disponible aquí.</b><br>No alcanzó a subirse o se adjuntó desde otro dispositivo. Vuelve a adjuntarlo.</div>` : "";
+  const faltante = (!foto && !(m&&m.driveId))
+      ? (m && ARCHIVOS[id]
+          ? `<p class="hint">Se está subiendo. Cuando termine se podrá reproducir desde Drive.</p>`
+          : `<div class="aviso" style="margin:0"><b>Archivo no disponible aquí.</b><br>No alcanzó a subirse o se adjuntó desde otro dispositivo. Vuelve a adjuntarlo.</div>`)
+      : "";
   const est = m && (m.estado || (m.driveId?"listo":""));
   const aviso = est==="error"
       ? `<div class="aviso" style="margin:10px 0 0"><b>No se pudo subir.</b><br>${esc(m.detalle||"Error desconocido")}</div>`
