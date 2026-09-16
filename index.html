@@ -1,6 +1,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Checklist Motorhome — Camperspot</title>
+<title>Checklist Motorhome — Camper Spot</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#354C00">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Checklist">
+<link rel="apple-touch-icon" href="./icono-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
@@ -192,6 +198,7 @@ pre.res{white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:12.5px
 </div></div>
 <div class="rail" id="rail" hidden><div class="rail-in" id="railIn"></div></div>
 
+<div id="sinRed" hidden>Sin conexión · lo que llenes se guarda y se sube al volver</div>
 <div class="wrap" id="app"></div>
 <div class="pie" id="pie" hidden><div class="pie-in" id="pieIn"></div></div>
 <div id="modales"></div>
@@ -393,10 +400,8 @@ async function guardaFicha(forzar){
   const r=S.r; if(!r) return;
   const yaExiste = S.indice.some(x=>x.id===r.id);
   if(!yaExiste && !forzar && !r.patente && !r.cliente) return;   // ficha en blanco: no se archiva
-  if(r.driveNombre && r.driveNombre !== nombreCarpeta(r)){
-    delete r.driveCarpeta; delete r.driveSubs;
-  }
-  r.driveNombre = nombreCarpeta(r);
+  if(!r.driveCarpeta) r.driveNombre = nombreCarpeta(r);
+  else if(r.driveNombre !== nombreCarpeta(r)) setTimeout(()=>renombraCarpeta(r), 0);
   r.act=Date.now();
   const [n,t]=progTotal(r);
   const res={id:r.id,suc:r.suc,patente:r.patente,cliente:r.cliente,fi:r.fi,ft:r.ft,
@@ -407,6 +412,9 @@ async function guardaFicha(forzar){
   await St.set("r:"+r.id, JSON.stringify(r));
   await guardaIndice();
   S.guardado=Date.now(); pintaPie();
+  if(hayDrive() && datosListos(r) && !PREPARANDO &&
+     SLOTS_VIDEO.some(def=>!(r.driveSubs||{})["Videos/"+def.carpeta]))
+    setTimeout(alistaVideos, 0);
 }
 async function abreFicha(id){
   const raw = await St.get("r:"+id); if(!raw) return flash("No se encontró la ficha");
@@ -709,13 +717,19 @@ const SLOTS_VIDEO = [
   {k:"v_tec", t:"Techo",           carpeta:"3 Techo",           archivo:"3-techo"},
 ];
 
+/* La clave interna se mantiene fija; el nombre visible lleva la referencia del
+   arriendo para que el operario confirme en Drive que está en el lugar correcto. */
+const limpio = t => String(t||"").replace(/[\\/:*?"<>|]/g," ").replace(/\s+/g," ").trim();
+const nombreSubcarpeta = (r,def) =>
+  `${def.carpeta} · ${limpio(r.patente)||"sin patente"} · ${limpio(r.cliente)||"sin cliente"}`;
+
 async function carpetaVideo(r, slotKey){
   const def = SLOTS_VIDEO.find(x=>x.k===slotKey);
   const clave = "Videos/"+def.carpeta;
   r.driveSubs = r.driveSubs || {};
   if(r.driveSubs[clave]) return r.driveSubs[clave];
   const padreId = await carpetaSub(r, "Videos");
-  const { carpetaId } = await api("/carpeta", { ruta:[def.carpeta], padreId });
+  const { carpetaId } = await api("/carpeta", { ruta:[nombreSubcarpeta(r,def)], padreId });
   r.driveSubs[clave] = carpetaId;
   if(S.r && S.r.id===r.id){ S.r.driveSubs = S.r.driveSubs||{}; S.r.driveSubs[clave]=carpetaId; }
   await guardaFicha();
@@ -732,31 +746,36 @@ async function revisaVideosDrive(silencioso){
   let total=0, nuevos=0, sueltos=0, fallo="";
   r.driveVids = r.driveVids || {};
   try{
-    for(const def of SLOTS_VIDEO){
-      const id = (r.driveSubs||{})["Videos/"+def.carpeta];
-      if(!id) continue;
-      const d = await api("/listar?carpetaId="+encodeURIComponent(id));
-      const archivos = (d.files||[])
-        .filter(f=>f.mimeType !== "application/vnd.google-apps.folder")
+    const subs = r.driveSubs||{};
+    const noCarpeta = f => f.mimeType !== "application/vnd.google-apps.folder";
+    const consultas = SLOTS_VIDEO.map(def=>{
+      const id = subs["Videos/"+def.carpeta];
+      return id ? api("/listar?carpetaId="+encodeURIComponent(id)).then(d=>({def, d}))
+                : Promise.resolve(null);
+    });
+    if(subs.Videos) consultas.push(
+      api("/listar?carpetaId="+encodeURIComponent(subs.Videos))
+        .then(d=>{ sueltos = (d.files||[]).filter(noCarpeta).length; return null; }));
+
+    const res = await Promise.all(consultas);
+    const renombres = [];
+    for(const x of res){
+      if(!x) continue;
+      const { def, d } = x;
+      const archivos = (d.files||[]).filter(noCarpeta)
         .map(f=>({ id:f.id, nombre:f.name, mb:Math.round(Number(f.size||0)/1048576) }));
       const antes = (r.driveVids[def.k]||[]).length;
       r.driveVids[def.k] = archivos;
       total += archivos.length;
       nuevos += Math.max(0, archivos.length - antes);
-      for(let i=0;i<archivos.length;i++){
-        const esperado = `${def.archivo}${i?"-"+(i+1):""}.${EXT(archivos[i].nombre)}`;
-        if(archivos[i].nombre !== esperado){
-          try{ await api("/renombrar", { fileId:archivos[i].id, nombre:esperado });
-               archivos[i].nombre = esperado; }catch(e){}
-        }
-      }
+      archivos.forEach((a,i)=>{
+        const esperado = `${def.archivo}${i?"-"+(i+1):""}.${EXT(a.nombre)}`;
+        if(a.nombre !== esperado)
+          renombres.push(api("/renombrar",{fileId:a.id,nombre:esperado})
+            .then(()=>{ a.nombre = esperado; }).catch(()=>{}));
+      });
     }
-    // Archivos dejados en la carpeta Videos general en vez de la del tema
-    const gen = (r.driveSubs||{}).Videos;
-    if(gen){
-      const d = await api("/listar?carpetaId="+encodeURIComponent(gen));
-      sueltos = (d.files||[]).filter(f=>f.mimeType!=="application/vnd.google-apps.folder").length;
-    }
+    await Promise.all(renombres);
     r.revisado = Date.now();
     await guardaFicha(true);
   }catch(e){ fallo = corta(e.message||e); }
@@ -764,22 +783,60 @@ async function revisaVideosDrive(silencioso){
   if(fallo) flash("No se pudo revisar: "+fallo);
   else if(sueltos) flash(`${sueltos} archivo(s) están en la carpeta Videos, no en la del tema`);
   else if(!silencioso) flash(total ? `${total} video(s) confirmados` : "Las carpetas están vacías");
-  else if(nuevos) flash(`${nuevos} video(s) nuevo(s)`);
+  else if(nuevos) flash(nuevos===1 ? "Video confirmado en Drive" : `${nuevos} videos confirmados`);
 }
 const videosDe = (r,slot) => (r.driveVids||{})[slot] || [];
+
+/* Drive sube en segundo plano, así que la app va confirmando sola cada 20
+   segundos mientras el operario sigue llenando el checklist. */
+let RELOJ = null;
+function vigilaVideos(){
+  clearInterval(RELOJ); RELOJ = null;
+  if(!(S.vista==="ficha" && S.etapa==="entrega" && hayDrive() && S.r)) return;
+  if(cuentaVideos(S.r) >= SLOTS_VIDEO.length) return;
+  RELOJ = setInterval(()=>{
+    if(!(S.vista==="ficha" && S.etapa==="entrega" && S.r)){ clearInterval(RELOJ); RELOJ=null; return; }
+    if(cuentaVideos(S.r) >= SLOTS_VIDEO.length){ clearInterval(RELOJ); RELOJ=null; return; }
+    if(!navigator.onLine || S.revisando || document.hidden) return;
+    revisaVideosDrive(true);
+  }, 20000);
+}
 
 /* Las carpetas se crean al entrar a la etapa: Safari bloquea abrir una ventana
    si entremedio hubo una espera, así que el botón tiene que ser un enlace listo. */
 let PREPARANDO = false;
+let RENOMBRANDO = false;
+async function renombraCarpeta(r){
+  if(RENOMBRANDO || !hayDrive() || !r.driveCarpeta) return;
+  const nuevo = nombreCarpeta(r);
+  if(r.driveNombre === nuevo) return;
+  RENOMBRANDO = true;
+  try{
+    const tareas = [ api("/renombrar", { fileId:r.driveCarpeta, nombre:nuevo }) ];
+    for(const def of SLOTS_VIDEO){
+      const id = (r.driveSubs||{})["Videos/"+def.carpeta];
+      if(id) tareas.push(api("/renombrar", { fileId:id, nombre:nombreSubcarpeta(r,def) }));
+    }
+    await Promise.all(tareas);
+    r.driveNombre = nuevo;
+    await guardaFicha(true);
+    flash("Carpetas de Drive actualizadas");
+  }catch(e){ /* se reintenta en el próximo guardado */ }
+  finally{ RENOMBRANDO = false; }
+}
+
+const datosListos = r => !!(r && r.patente && r.cliente && (r.ft || r.fi));
+
 async function alistaVideos(){
   const r=S.r;
   if(!r || !hayDrive() || PREPARANDO) return;
-  if(!r.patente && !r.cliente) return;
+  if(!datosListos(r)) return;
   const faltan = SLOTS_VIDEO.filter(def=>!(r.driveSubs||{})["Videos/"+def.carpeta]);
   if(!faltan.length) return;
   PREPARANDO = true;
   try{
-    for(const def of faltan) await carpetaVideo(r, def.k);
+    await carpetaSub(r, "Videos");                       // el padre primero
+    await Promise.all(faltan.map(def=>carpetaVideo(r, def.k)));
     await guardaFicha(true);
     if(S.vista==="ficha" && S.etapa==="entrega") pinta(true);
   }catch(e){
@@ -923,6 +980,7 @@ function pinta(keep){
   const rail=document.getElementById("rail"), pie=document.getElementById("pie");
   if(S.vista==="ficha"&&S.r){ rail.hidden=false; pie.hidden=false; pintaRail(); pintaPie(); }
   else { rail.hidden=true; pie.hidden=true; }
+  pintaConexion();
   if(S.vista==="inicio") vistaInicio();
   else if(S.vista==="flota") vistaFlota();
   else if(S.vista==="archivo") vistaArchivo();
@@ -1042,8 +1100,8 @@ function vistaFlota(){
 function vistaFicha(){
   const r=S.r;
   if(S.etapa==="entrega" && hayDrive()){
-    setTimeout(async()=>{ await alistaVideos(); revisaVideosDrive(true); }, 60);
-  }
+    setTimeout(async()=>{ await alistaVideos(); await revisaVideosDrive(true); vigilaVideos(); }, 60);
+  } else { clearInterval(RELOJ); RELOJ=null; }
   const secciones={datos:secDatos,prep:secPrep,entrega:secEntrega,revision:secRevision,reporte:secReporte};
   const ix=ETAPAS.findIndex(e=>e.k===S.etapa);
   app.innerHTML = `${hayDrive()?"":`<div class="aviso" style="margin:12px 0 0"><b>Drive sin conectar.</b><br>
@@ -1085,6 +1143,11 @@ function secDatos(r){
         <button class="chk" data-adic="${a}" aria-pressed="${(r.adicionales||[]).includes(a)}"><span class="box"></span>${a}</button></li>`).join("")}</ul>
     </details>
     <label class="f"><span>Observaciones</span><textarea data-set="obs" placeholder="Opcional">${esc(r.obs)}</textarea></label>
+    ${hayDrive() ? (r.driveCarpeta
+      ? `<p class="hint"><span class="badge ok">Carpeta lista en Drive</span> ${esc(r.driveNombre||nombreCarpeta(r))}</p>`
+      : datosListos(r)
+        ? `<p class="hint"><span class="badge warn">Creando carpeta en Drive…</span></p>`
+        : `<p class="hint">La carpeta de Drive se crea sola al completar patente, cliente y fechas.</p>`) : ""}
   </div></div>`;
 }
 
@@ -1107,8 +1170,8 @@ function secEntrega(r){
   const listas = SLOTS_VIDEO.every(def=>(r.driveSubs||{})["Videos/"+def.carpeta]);
   return `<div class="card"><h3>Videos del recorrido</h3>
   <div class="pad" style="padding-bottom:4px">
-    <p class="hint" style="margin:0">Graba con la app de cámara del teléfono en 1080p y súbelos desde Drive:
-    sigue subiendo aunque cierres el checklist o bloquees la pantalla.</p>
+    <p class="hint" style="margin:0"><b>No esperes en Drive.</b> Aprieta subir y vuelve de inmediato:
+    Drive termina solo aunque cierres todo, y acá cada video se marca ✓ cuando llega.</p>
     ${hayDrive()?"":`<div class="aviso" style="margin:10px 0 0"><b>Drive sin conectar.</b><br>
       <button class="btn ghost sm" data-act="ajustes" style="margin-top:8px">Conectar</button></div>`}
   </div>
@@ -1135,8 +1198,9 @@ function secEntrega(r){
     <button class="btn ghost wide" data-act="revisarVideos">${S.revisando?"Revisando…":"Revisar qué llegó a Drive"}</button>
     <button class="btn ghost sm" data-act="diagnostico" style="margin-top:8px">Diagnóstico</button>
     <p class="hint">${!listas?"Las carpetas se están creando.":
-      r.revisado?"Última revisión: "+new Date(r.revisado).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"}):
-      "Después de subir en Drive, toca Revisar para confirmar."}</p>
+      cuentaVideos(r)>=SLOTS_VIDEO.length?"Los tres videos están confirmados.":
+      RELOJ?"Revisando solo cada 20 segundos mientras sigues aquí.":
+      "Toca Revisar para confirmar."}${r.revisado?" · Última: "+new Date(r.revisado).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"}):""}</p>
   </div></div>
 
   <div class="card"><h3>Tablero y firma</h3>
@@ -1572,5 +1636,21 @@ function flash(msg,fijo){
 window.addEventListener("beforeunload", e=>{
   if(pendientes()){ e.preventDefault(); e.returnValue=""; }
 });
+if("serviceWorker" in navigator)
+  window.addEventListener("load", ()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));
+
+/* Aviso de conexión y reintento de lo que quedó pendiente */
+function pintaConexion(){
+  const b=document.getElementById("sinRed");
+  if(b) b.hidden = navigator.onLine;
+}
+window.addEventListener("online", ()=>{
+  pintaConexion(); flash("Conexión recuperada");
+  COLA.forEach(t=>{ t.tomado=false; });
+  procesaCola();
+  if(S.r && S.etapa==="entrega") revisaVideosDrive(true);
+});
+window.addEventListener("offline", ()=>{ pintaConexion(); flash("Sin conexión · se guarda en el teléfono"); });
+
 bootstrap();
 </script>
