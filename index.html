@@ -389,6 +389,10 @@ async function guardaFicha(forzar){
   const r=S.r; if(!r) return;
   const yaExiste = S.indice.some(x=>x.id===r.id);
   if(!yaExiste && !forzar && !r.patente && !r.cliente) return;   // ficha en blanco: no se archiva
+  if(r.driveNombre && r.driveNombre !== nombreCarpeta(r)){
+    delete r.driveCarpeta; delete r.driveSubs;
+  }
+  r.driveNombre = nombreCarpeta(r);
   r.act=Date.now();
   const [n,t]=progTotal(r);
   const res={id:r.id,suc:r.suc,patente:r.patente,cliente:r.cliente,fi:r.fi,ft:r.ft,
@@ -488,6 +492,8 @@ async function quitaMedia(slot,id,danoId){
 /* ══════════ CONEXIÓN CON GOOGLE DRIVE ══════════ */
 let CFG = { url:"https://drive-camperspot.miguelduchs.workers.dev", clave:"" };
 const hayDrive = ()=> !!(CFG.url && CFG.clave);
+const corta = t => { t=String(t||"").replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim();
+  return t.length>180 ? t.slice(0,180)+"…" : t; };
 const ARCHIVOS = {};          // id -> File o Blob pendiente de subir (solo esta sesión)
 const COLA = [];              // trabajos de subida
 let SUBIENDO = false;
@@ -504,8 +510,10 @@ async function api(ruta, cuerpo){
     headers: { "Content-Type":"application/json", "x-clave": CFG.clave },
     body: cuerpo ? JSON.stringify(cuerpo) : undefined,
   });
-  const d = await r.json().catch(()=>({error:"Respuesta ilegible"}));
-  if(!r.ok) throw new Error(d.error || ("HTTP "+r.status));
+  const txt = await r.text();
+  let d={};
+  try{ d=JSON.parse(txt); }catch(e){ throw new Error("Respuesta inesperada del servidor"); }
+  if(!r.ok) throw new Error(corta(d.error || ("HTTP "+r.status)));
   return d;
 }
 
@@ -546,7 +554,7 @@ async function procesaCola(){
         await subeArchivo(t);
         t.media.estado="listo"; delete t.media.detalle; ok=true;
       }catch(e){
-        t.media.detalle = String(e.message||e);
+        t.media.detalle = corta(e.message||e);
         if(intento<3) await new Promise(r=>setTimeout(r, intento*2500));
       }
     }
@@ -568,8 +576,7 @@ async function subeArchivo(t){
   const ext = EXT(t.media.nombre) || (t.media.tipo==="video" ? "mp4" : "jpg");
   const nombre = `${d.base}${i?"-"+(i+1):""}.${ext}`;
 
-  await carpetaArriendo(r);
-  const { carpetaId } = await api("/carpeta", { ruta:[RAIZ, nombreCarpeta(r), d.sub] });
+  const carpetaId = await carpetaSub(r, d.sub);
   const { subidaUrl } = await api("/sesion", {
     carpetaId, nombre, mime: blob.type || "application/octet-stream", tamano: blob.size,
   });
@@ -607,13 +614,22 @@ async function carpetaArriendo(r){
   if(S.r && S.r.id===r.id) S.r.driveCarpeta = carpetaId;
   return carpetaId;
 }
+/* Los ids se guardan en la ficha para no volver a buscarlos en cada archivo */
+async function carpetaSub(r, sub){
+  r.driveSubs = r.driveSubs || {};
+  if(r.driveSubs[sub]) return r.driveSubs[sub];
+  await carpetaArriendo(r);
+  const { carpetaId } = await api("/carpeta", { ruta:[RAIZ, nombreCarpeta(r), sub] });
+  r.driveSubs[sub] = carpetaId;
+  if(S.r && S.r.id===r.id){ S.r.driveSubs = S.r.driveSubs||{}; S.r.driveSubs[sub]=carpetaId; }
+  return carpetaId;
+}
 const linkCarpeta = id => id ? `https://drive.google.com/drive/folders/${id}` : "";
 
 /* Sube ficha.json y resumen.txt */
 async function subeDocumentos(r){
   if(!hayDrive()) return;
-  await carpetaArriendo(r);
-  const { carpetaId } = await api("/carpeta", { ruta:[RAIZ, nombreCarpeta(r), "Ficha"] });
+  const carpetaId = await carpetaSub(r, "Ficha");
   await api("/texto", { carpetaId, nombre:"resumen.txt", contenido:textoResumen(r), mime:"text/plain" });
   await api("/texto", { carpetaId, nombre:"ficha.json",
     contenido:JSON.stringify(fichaExport(r),null,2), mime:"application/json" });
