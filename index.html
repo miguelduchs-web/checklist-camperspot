@@ -239,9 +239,7 @@ const REV_GRUPOS = [
 ];
 
 const SLOTS = [
-  {k:"v_ext",  et:"entrega",  tipo:"video", t:"Video exterior y bajo", d:"Recorrido completo mostrando los cuatro costados y los bajos.", req:1},
-  {k:"v_int",  et:"entrega",  tipo:"video", t:"Video interior",        d:"Recorrido por cocina, baño, camas y comedor.", req:1},
-  {k:"v_tec",  et:"entrega",  tipo:"video", t:"Video techo",           d:"Estado del techo, escotillas y sellos.", req:1},
+  {k:"v_rec",  et:"entrega",  tipo:"video", t:"Videos del recorrido", d:"Exterior y bajos · interior · techo.", req:3},
   {k:"f_tab_s",et:"entrega",  tipo:"foto",  t:"Foto al tablero (salida)", d:"Debe verse el millaje y el indicador de bencina.", req:1},
   {k:"f_tab_l",et:"revision", tipo:"foto",  t:"Foto al tablero (llegada)", d:"Nivel de bencina y millaje de regreso.", req:1},
 ];
@@ -337,10 +335,11 @@ function prog(r,et){
   if(et==="datos"){ const c=[r.patente,r.cliente,r.fi,r.ft]; return [c.filter(Boolean).length,c.length]; }
   if(et==="prep"){ const it=itemsPrep(r); return [it.filter(x=>r.prep[x.k]).length, it.length]; }
   if(et==="entrega"){
-    const sl=SLOTS.filter(s=>s.et==="entrega");
-    let n=sl.filter(s=>(r.media[s.k]||[]).length).length, t=sl.length+1;
+    let n=0;
+    if(cuentaVideos(r) >= 3) n++;
+    if((r.media.f_tab_s||[]).length) n++;
     if(r.entrega.km) n++;
-    return [n,t];
+    return [n,3];
   }
   if(et==="revision"){
     let n=(r.media.f_tab_l||[]).length?1:0, tot=1;
@@ -370,6 +369,7 @@ const FASES=[
   {k:"lista",   t:"Listas para cerrar", d:"Sin nada pendiente"},
   {k:"datos",   t:"Faltan datos",       d:"Sin patente, cliente o fechas"},
 ];
+const cuentaVideos = r => ((r.media&&r.media.v_rec)||[]).length + ((r.driveVideos)||[]).length;
 const progTotal = r => ETAPAS.reduce((a,e)=>{const[n,t]=prog(r,e.k);return[a[0]+n,a[1]+t]},[0,0]);
 
 /* ══════════ CARGA ══════════ */
@@ -425,6 +425,7 @@ async function abreFicha(id){
     if(m.tipo==="foto" && !FOTOS[m.id]){ const x=await St.get("f:"+m.id); if(x) FOTOS[m.id]=x; }
     if(m.thumb && !THUMBS[m.id]){ const x=await St.get("t:"+m.id); if(x) THUMBS[m.id]=x; }
   }
+  if((S.r.ultimaEtapa||"")==="entrega") setTimeout(alistaVideos,300);
   S.etapa = (S.r.ultimaEtapa && ETAPAS.some(e=>e.k===S.r.ultimaEtapa)) ? S.r.ultimaEtapa : faseDe(S.r).etapa;
   pinta();
 }
@@ -560,7 +561,7 @@ function destino(r, slot, danoId, indice){
     REV_GRUPOS.forEach(g=>itemsRev(g,r).forEach(x=>{ if(x.k===k) t=x.t; }));
     return { sub:"Daños", base: slug(t) };
   }
-  if(slot==="v_ext"||slot==="v_int"||slot==="v_tec") return { sub:"Videos", base:NOMBRES[slot] };
+  if(slot==="v_rec") return { sub:"Videos", base:NOMBRES[slot] };
   if(NOMBRES[slot]) return { sub:"Ficha", base:NOMBRES[slot] };
   return { sub:"Ficha", base: slug(slot||"archivo") };
 }
@@ -698,6 +699,58 @@ async function carpetaSub(r, sub){
 }
 const linkCarpeta = id => id ? `https://drive.google.com/drive/folders/${id}` : "";
 
+/* ── Videos subidos con la app de Drive ────────────────────────────────
+   Safari congela el JavaScript al salir de la pestaña, así que una página web
+   no puede subir en segundo plano. La app de Drive sí. El operario sube ahí y
+   al volver leemos la carpeta para saber qué llegó. */
+const SLOTS_VIDEO = [
+  {k:"v_ext", t:"Exterior y bajo", n:"1-exterior-y-bajo"},
+  {k:"v_int", t:"Interior",        n:"2-interior"},
+  {k:"v_tec", t:"Techo",           n:"3-techo"},
+];
+async function abreCarpetaVideos(){
+  const r=S.r;
+  flash("Preparando la carpeta…", true);
+  try{
+    const id = await carpetaSub(r, "Videos");
+    await guardaFicha();
+    flash("Abriendo Drive");
+    window.open(linkCarpeta(id), "_blank", "noopener");
+  }catch(e){ flash("No se pudo abrir: "+corta(e.message)); }
+}
+async function revisaVideosDrive(silencioso){
+  const r=S.r; if(!r || !hayDrive() || !(r.driveSubs||{}).Videos) return;
+  try{
+    if(!silencioso) flash("Buscando videos…", true);
+    const d = await api("/listar?carpetaId="+encodeURIComponent(r.driveSubs.Videos));
+    const previos = (r.driveVideos||[]).length;
+    const mapa = new Map((r.driveVideos||[]).map(v=>[v.id,v]));
+    r.driveVideos = (d.files||[])
+      .filter(f=>f.mimeType && f.mimeType.startsWith("video"))
+      .map(f=>({ id:f.id, nombre:f.name, mb:Math.round(Number(f.size||0)/1048576),
+                 slot:(mapa.get(f.id)||{}).slot || "" }));
+    await guardaFicha();
+    const nuevos = r.driveVideos.length - previos;
+    if(!silencioso || nuevos>0)
+      flash(r.driveVideos.length ? `${r.driveVideos.length} video(s) en la carpeta` : "Todavía no hay videos");
+    pinta(true);
+  }catch(e){ if(!silencioso) flash("No se pudo revisar: "+corta(e.message)); }
+}
+async function asignaSlot(fileId, slot){
+  const r=S.r, v=(r.driveVideos||[]).find(x=>x.id===fileId); if(!v) return;
+  (r.driveVideos||[]).forEach(x=>{ if(x.slot===slot && x.id!==fileId) x.slot=""; });
+  v.slot = slot;
+  await guardaFicha(); pinta(true);
+  if(slot){
+    const def = SLOTS_VIDEO.find(x=>x.k===slot);
+    const ext = EXT(v.nombre) || "mp4";
+    try{ await api("/renombrar", { fileId, nombre:`${def.n}.${ext}` });
+         v.nombre = `${def.n}.${ext}`; await guardaFicha(); pinta(true);
+    }catch(e){ flash("Se asignó, pero no se pudo renombrar"); }
+  }
+}
+const videoDe = (r,slot) => (r.driveVideos||[]).find(v=>v.slot===slot);
+
 /* Sube ficha.json y resumen.txt */
 async function subeDocumentos(r){
   if(!hayDrive()) return;
@@ -723,6 +776,41 @@ function buscaMedia(id){
   for(const d of r.danos||[]){ const m=(d.fotos||[]).find(x=>x.id===id); if(m) return m; }
   return null;
 }
+
+/* Deja la carpeta creada antes de que el operario la necesite */
+async function alistaVideos(){
+  const r=S.r;
+  if(!r || !hayDrive() || (r.driveSubs||{}).Videos) return;
+  if(!r.patente && !r.cliente) return;
+  try{ await carpetaSub(r,"Videos"); await guardaFicha(true); pinta(true); }catch(e){}
+}
+
+/* Consulta qué videos llegaron a la carpeta de Drive */
+async function revisarVideos(avisar){
+  const r=S.r; if(!r || !hayDrive()) return;
+  try{
+    S.revisando=true; if(avisar) pinta(true);
+    const carpeta = await carpetaSub(r,"Videos");
+    const d = await api("/listar?carpetaId="+encodeURIComponent(carpeta));
+    const antes=(r.driveVideos||[]).length;
+    r.driveVideos = (d.files||[])
+      .filter(f=>/video|mp4|mov|m4v|avi/i.test(f.mimeType+" "+f.name))
+      .map(f=>({id:f.id,name:f.name,size:f.size||0}));
+    S.revisando=false;
+    await guardaFicha(true); pinta(true);
+    const ahora=r.driveVideos.length;
+    if(avisar) flash(ahora ? `${ahora} video(s) en la carpeta` : "Todavía no llega ninguno");
+    else if(ahora>antes) flash(`${ahora-antes} video(s) nuevo(s) detectado(s)`);
+  }catch(e){
+    S.revisando=false; pinta(true);
+    if(avisar) flash("No se pudo revisar: "+corta(e.message));
+  }
+}
+
+/* Al volver a la app desde Drive, se revisa solo */
+document.addEventListener("visibilitychange", ()=>{
+  if(!document.hidden && S.vista==="ficha" && S.etapa==="entrega" && hayDrive()) revisarVideos(false);
+});
 
 /* ══════════ AJUSTES ══════════ */
 function vistaAjustes(){
@@ -972,10 +1060,77 @@ function secPrep(r){
     </div></div>`;
 }
 
+function bloqueVideos(r){
+  const enDrive=(r.driveVideos||[]), aqui=(r.media.v_rec||[]);
+  const total=enDrive.length+aqui.length;
+  const carpeta=(r.driveSubs||{}).Videos;
+  return `<div class="card"><h3>Videos del recorrido
+      <em>${total} de 3</em></h3>
+    <div class="slot">
+      <p style="margin:0 0 10px">Tres videos: <b>exterior y bajos</b>, <b>interior</b> y <b>techo</b>.
+      Grábalos con la app de cámara del teléfono en 1080p.</p>
+      ${hayDrive() ? (carpeta
+        ? `<a class="btn acento wide" style="text-decoration:none"
+             href="https://drive.google.com/drive/folders/${carpeta}" target="_blank" rel="noopener">Subir por Drive (recomendado)</a>
+           <p class="hint">Abre la carpeta de este arriendo. Ahí aprieta <b>+</b> → <b>Subir</b> y elige los videos.
+           Drive los sube solo aunque cierres el checklist o bloquees la pantalla.</p>`
+        : `<button class="btn acento wide" data-act="prepararCarpeta">Preparar carpeta en Drive</button>`)
+       : `<div class="aviso" style="margin:0"><b>Drive sin conectar.</b></div>`}
+      ${enDrive.length?`<ul class="arch" style="margin-top:10px">
+        ${enDrive.map(v=>`<li><code>${esc(v.name)}</code> <small>${v.size?(Number(v.size)/1048576).toFixed(0)+" MB":""}</small></li>`).join("")}
+      </ul>`:""}
+      ${hayDrive()?`<div class="row" style="margin-top:10px">
+        <button class="btn ghost sm" data-act="revisarVideos">${S.revisando?"Revisando…":"Revisar qué subí"}</button>
+        <button class="btn ghost sm" data-add="v_rec" data-tipo="video">Adjuntar aquí (con WiFi)</button>
+      </div>`:`<div class="row" style="margin-top:10px">
+        <button class="btn ghost sm" data-add="v_rec" data-tipo="video">Adjuntar</button></div>`}
+      <div class="tiras">${aqui.map(m=>tiraHTML(m,"v_rec")).join("")}</div>
+    </div></div>`;
+}
+
 function secEntrega(r){
-  return `<div class="card"><h3>Registro audiovisual de entrega</h3>
-    ${SLOTS.filter(s=>s.et==="entrega").map(s=>slotHTML(s,r)).join("")}</div>
-  <div class="card"><h3>Millaje y firma</h3><div class="pad">
+  const vids = r.driveVideos||[];
+  const sinAsignar = vids.filter(v=>!v.slot);
+  return `<div class="card"><h3>Videos del recorrido</h3><div class="pad">
+    ${hayDrive() ? `
+      <button class="btn acento wide" data-act="abrirVideos">Subir videos desde Drive</button>
+      <p class="hint">Recomendado. La app de Drive sigue subiendo aunque cierres el checklist o bloquees la pantalla. Cuando vuelvas, toca Revisar.</p>
+      <div class="row" style="margin-top:10px">
+        <button class="btn ghost sm" data-act="revisarVideos">Revisar qué llegó</button>
+        ${r.driveSubs&&r.driveSubs.Videos?`<a class="btn ghost sm" style="text-decoration:none" target="_blank" rel="noopener"
+           href="${linkCarpeta(r.driveSubs.Videos)}">Abrir carpeta</a>`:""}
+      </div>`
+    : `<div class="aviso" style="margin:0"><b>Drive sin conectar.</b><br>
+        <button class="btn ghost sm" data-act="ajustes" style="margin-top:8px">Conectar</button></div>`}
+  </div>
+
+  ${SLOTS_VIDEO.map(sv=>{
+    const asignado = videoDe(r, sv.k);
+    const local = (r.media[sv.k]||[]);
+    return `<div class="slot">
+      <h4>${sv.t} ${asignado||local.length?`<span class="badge ok">Listo</span>`:`<span class="badge warn">Pendiente</span>`}</h4>
+      ${asignado
+        ? `<p>${esc(asignado.nombre)}${asignado.mb?` · ${asignado.mb} MB`:""}</p>
+           <div class="row">
+             <a class="btn ghost sm" style="text-decoration:none" target="_blank" rel="noopener"
+                href="https://drive.google.com/file/d/${asignado.id}/view">Reproducir</a>
+             <button class="btn ghost sm" data-asigna="${asignado.id}" data-slot="">Quitar</button>
+           </div>`
+        : local.length
+          ? `<div class="tiras">${local.map(m=>tiraHTML(m,sv.k)).join("")}</div>`
+          : sinAsignar.length
+            ? `<p>Elige cuál de los videos de la carpeta corresponde:</p>
+               <div class="row">${sinAsignar.map(v=>
+                 `<button class="btn ghost sm" data-asigna="${v.id}" data-slot="${sv.k}">${esc(v.nombre)}${v.mb?` · ${v.mb}MB`:""}</button>`).join("")}</div>`
+            : `<p>Sube el video desde Drive, o adjúntalo aquí si estás en WiFi.</p>
+               <button class="btn ghost sm" data-add="${sv.k}" data-tipo="video">Adjuntar desde aquí</button>`}
+    </div>`;
+  }).join("")}
+  </div>
+
+  <div class="card"><h3>Tablero y firma</h3>
+    ${slotHTML(SLOTS.find(x=>x.k==="f_tab_s"),r)}
+    <div class="pad">
     <label class="f"><span>Millaje de salida</span><input type="number" inputmode="numeric" data-set="entrega.km" value="${esc(r.entrega.km)}" placeholder="Ej: 189603"></label>
     <span style="display:block;font-size:13px;color:var(--gris);margin-bottom:3px">Firma del cliente</span>
     ${r.entrega.firma?`<img src="${r.entrega.firma}" alt="Firma registrada" style="width:100%;max-width:320px;border:1px solid var(--linea);border-radius:4px;background:#fff">
@@ -1020,13 +1175,13 @@ function rutas(r){
 }
 const EXT = n => { const p=String(n||"").split("."); return p.length>1 ? p.pop().toLowerCase() : "jpg"; };
 const NOMBRES = {
-  v_ext:"1-exterior-y-bajo", v_int:"2-interior", v_tec:"3-techo",
+  v_rec:"recorrido",
   f_tab_s:"tablero-salida", f_tab_l:"tablero-llegada",
 };
 function archivosDe(r){
   const out={videos:[], ficha:[{n:"ficha.json"},{n:"resumen.txt"}], danos:[]};
-  ["v_ext","v_int","v_tec"].forEach(k=>(r.media[k]||[]).forEach((m,i)=>
-    out.videos.push({n:`${NOMBRES[k]}${i?"-"+(i+1):""}.${EXT(m.nombre)}`})));
+  (r.media.v_rec||[]).forEach((m,i)=>out.videos.push({n:`recorrido-${i+1}.${EXT(m.nombre)}`}));
+  (r.driveVideos||[]).forEach(v=>out.videos.push({n:v.name}));
   ["f_tab_s","f_tab_l"].forEach(k=>(r.media[k]||[]).forEach((m,i)=>
     out.ficha.push({n:`${NOMBRES[k]}${i?"-"+(i+1):""}.${EXT(m.nombre)}`})));
   hallazgos(r).forEach(h=>h.media.forEach((m,i)=>
@@ -1176,13 +1331,17 @@ document.addEventListener("click", async ev=>{
   const d=t.dataset;
 
   if(d.suc){ S.suc=d.suc; pinta(); return; }
-  if(d.etapa){ if(S.r){ S.r.ultimaEtapa=d.etapa; await guardaFicha(true); } S.etapa=d.etapa; pinta(); return; }
+  if(d.etapa){ if(S.r){ S.r.ultimaEtapa=d.etapa; await guardaFicha(true); } S.etapa=d.etapa; pinta();
+    if(S.etapa==="entrega") alistaVideos(); return; }
   if(d.nav){ const i=ETAPAS.findIndex(e=>e.k===S.etapa)+Number(d.nav);
     if(i<0||i>=ETAPAS.length) return;
-    S.etapa=ETAPAS[i].k; S.r.ultimaEtapa=S.etapa; await guardaFicha(true); pinta(); return; }
+    S.etapa=ETAPAS[i].k; S.r.ultimaEtapa=S.etapa; await guardaFicha(true); pinta();
+    if(S.etapa==="entrega") alistaVideos(); return; }
   if(d.abre){ await abreFicha(d.abre); return; }
   if(d.chk!=null){ S.r.prep[d.chk]=!S.r.prep[d.chk];
     t.setAttribute("aria-pressed",!!S.r.prep[d.chk]); pintaRail(); pintaPie(); guardaFicha(); return; }
+  if(d.asigna!==undefined && d.slot!==undefined && t.dataset.asigna){
+    await asignaSlot(d.asigna, d.slot); return; }
   if(d.adic){
     const v=d.adic; let a=(S.r.adicionales||[]).slice();
     if(v==="Ninguno") a = a.includes("Ninguno") ? [] : ["Ninguno"];
@@ -1203,6 +1362,14 @@ document.addEventListener("click", async ev=>{
   switch(d.act){
     case "verArchivo": S.vista="archivo"; pinta(); break;
     case "ajustes": S.vista="ajustes"; pinta(); break;
+    case "abrirVideos": await abreCarpetaVideos(); break;
+    case "revisarVideos": await revisaVideosDrive(false); break;
+    case "prepararCarpeta":
+      try{ flash("Creando carpeta…",true); await carpetaSub(S.r,"Videos"); await guardaFicha(true);
+           flash("Carpeta lista"); pinta(true); }
+      catch(e){ flash("No se pudo: "+corta(e.message)); }
+      break;
+    case "revisarVideos": await revisarVideos(true); break;
     case "salir": {
       if(S.r){ S.r.ultimaEtapa=S.etapa; await guardaFicha(true); }
       const guardada = S.r && S.indice.some(x=>x.id===S.r.id);
@@ -1262,7 +1429,10 @@ document.addEventListener("input", ev=>{
 });
 function deb(){ clearTimeout(tmr); tmr=setTimeout(guardaFicha,600); }
 document.addEventListener("blur", e=>{ if(S.r && e.target.dataset && (e.target.dataset.set||e.target.dataset.dano)){ clearTimeout(tmr); guardaFicha(); } }, true);
-document.addEventListener("visibilitychange", ()=>{ if(document.hidden && S.r){ clearTimeout(tmr); guardaFicha(); } });
+document.addEventListener("visibilitychange", ()=>{
+  if(document.hidden){ if(S.r){ clearTimeout(tmr); guardaFicha(); } return; }
+  if(S.r && S.vista==="ficha" && S.etapa==="entrega") revisaVideosDrive(true);
+});
 
 function pedirArchivo(slot,tipo,cam,danoId){
   const inp=document.createElement("input");
@@ -1334,7 +1504,8 @@ function textoResumen(r){
   if(pend.length) L.push(`Pendiente: ${pend.map(x=>x.t+(x.adic?" (adicional)":"")).join(", ")}`);
   if(r.prepNota) L.push(`Nota: ${r.prepNota}`);
   L.push(``,`ENTREGA`,`Millaje de salida: ${r.entrega.km||"—"}`);
-  SLOTS.filter(s=>s.et==="entrega").forEach(s=>L.push(`${s.t}: ${(r.media[s.k]||[]).length} archivo(s)`));
+  L.push(`Videos del recorrido: ${cuentaVideos(r)} de 3`);
+  L.push(`Foto al tablero: ${(r.media.f_tab_s||[]).length?"sí":"pendiente"}`);
   L.push(`Firma del cliente: ${r.entrega.firma?"registrada":"pendiente"}`);
   L.push(``,`REVISIÓN`);
   REV_GRUPOS.forEach(g=>{
