@@ -24,7 +24,7 @@ body{
 h1,h2,h3,h4,.cond{font-family:"Barlow Condensed","Barlow Semi Condensed",system-ui,sans-serif;font-weight:600;letter-spacing:.01em}
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
-.wrap{max-width:820px;margin:0 auto;padding:0 14px 120px}
+.wrap{max-width:820px;margin:0 auto;padding:0 14px 170px}
 
 /* ---------- barra superior ---------- */
 .top{background:var(--oliva);color:#fff;position:sticky;top:0;z-index:40;box-shadow:0 1px 0 rgba(0,0,0,.18)}
@@ -142,12 +142,17 @@ section.bloque h2.tit{font-size:20px;margin:0 0 2px;display:flex;align-items:cen
 
 /* ---------- pie fijo ---------- */
 .pie{position:fixed;left:0;right:0;bottom:0;background:rgba(38,56,11,.97);padding:9px 14px calc(9px + env(safe-area-inset-bottom));z-index:45}
-.pie-in{max-width:820px;margin:0 auto;display:flex;gap:7px;align-items:center}
+.pie-in{max-width:820px;margin:0 auto;display:flex;gap:7px;align-items:center;flex-wrap:nowrap}
 .pie .nav{flex:0 0 40px;height:42px;border:1px solid #4C6317;background:#1F2E06;color:#fff;
   border-radius:4px;font-size:24px;line-height:1;padding:0;font-family:"Barlow Condensed"}
 .pie .nav[disabled]{opacity:.3}
 .pie .nav:active{background:var(--oliva)}
-@media(max-width:430px){.larga{display:none}}
+.pie .salir{white-space:nowrap}
+@media(max-width:470px){
+  .pie-in{flex-wrap:wrap}
+  .pie .est{order:2;flex:1 1 auto}
+  .pie .salir{order:3;flex:1 1 100%;margin-top:7px}
+}
 .pie .est{color:var(--salvia-cl);font-size:12px;flex:1;min-width:0;text-align:center;overflow:hidden}
 .pie .est b{color:#fff;display:block;font-family:"Barlow Condensed";font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
@@ -413,10 +418,13 @@ async function abreFicha(id){
   for(const k of Object.keys(S.r.media||{})){
     for(const m of S.r.media[k]){
       if(m.tipo==="foto" && !FOTOS[m.id]){ const d=await St.get("f:"+m.id); if(d) FOTOS[m.id]=d; }
+      if(m.thumb && !THUMBS[m.id]){ const d=await St.get("t:"+m.id); if(d) THUMBS[m.id]=d; }
     }
   }
-  for(const d of S.r.danos||[]) for(const m of d.fotos||[])
-    if(!FOTOS[m.id]){ const x=await St.get("f:"+m.id); if(x) FOTOS[m.id]=x; }
+  for(const d of S.r.danos||[]) for(const m of d.fotos||[]){
+    if(m.tipo==="foto" && !FOTOS[m.id]){ const x=await St.get("f:"+m.id); if(x) FOTOS[m.id]=x; }
+    if(m.thumb && !THUMBS[m.id]){ const x=await St.get("t:"+m.id); if(x) THUMBS[m.id]=x; }
+  }
   S.etapa = (S.r.ultimaEtapa && ETAPAS.some(e=>e.k===S.r.ultimaEtapa)) ? S.r.ultimaEtapa : faseDe(S.r).etapa;
   pinta();
 }
@@ -432,6 +440,29 @@ async function borraFicha(id){
 }
 
 /* ══════════ IMÁGENES ══════════ */
+const THUMBS = {};
+function miniaturaVideo(file){
+  return new Promise(ok=>{
+    let listo=false; const fin=v=>{ if(!listo){ listo=true; ok(v); } };
+    const v=document.createElement("video");
+    v.preload="metadata"; v.muted=true; v.playsInline=true;
+    const u=URL.createObjectURL(file); v.src=u;
+    v.onloadeddata=()=>{ try{ v.currentTime=Math.min(1, (v.duration||3)/3); }catch(e){ fin(null); } };
+    v.onseeked=()=>{
+      try{
+        const c=document.createElement("canvas");
+        const e=Math.min(1, 260/Math.max(v.videoWidth||260, v.videoHeight||260));
+        c.width=Math.round((v.videoWidth||260)*e); c.height=Math.round((v.videoHeight||260)*e);
+        c.getContext("2d").drawImage(v,0,0,c.width,c.height);
+        fin(c.toDataURL("image/jpeg",.6));
+      }catch(e){ fin(null); }
+      URL.revokeObjectURL(u);
+    };
+    v.onerror=()=>{ URL.revokeObjectURL(u); fin(null); };
+    setTimeout(()=>{ URL.revokeObjectURL(u); fin(null); }, 7000);
+  });
+}
+
 function comprime(file,max=1800,q=.72){
   return new Promise((ok,err)=>{
     const fr=new FileReader();
@@ -457,6 +488,8 @@ async function subir(slotKey, files, danoId){
       VIDEOS[id]=URL.createObjectURL(file);
       ARCHIVOS[id]=file;
       const m={id,tipo:"video",nombre:file.name,peso:file.size};
+      const th=await miniaturaVideo(file);
+      if(th){ THUMBS[id]=th; await St.set("t:"+id, th); m.thumb=1; }
       push(slotKey,m,danoId); encolar(r,slotKey,danoId,m);
     }else{
       let data; try{ data=await comprime(file); }catch(e){ flash("No se pudo leer la imagen"); continue; }
@@ -477,6 +510,7 @@ async function quitaArchivo(id){
   const i=COLA.findIndex(t=>t.id===id); if(i>=0) COLA.splice(i,1);
   delete ARCHIVOS[id];
   await St.del("f:"+id); delete FOTOS[id];
+  await St.del("t:"+id); delete THUMBS[id];
   if(VIDEOS[id]){ URL.revokeObjectURL(VIDEOS[id]); delete VIDEOS[id]; }
 }
 async function quitaMedia(slot,id,danoId){
@@ -484,13 +518,14 @@ async function quitaMedia(slot,id,danoId){
   if(danoId){ const d=r.danos.find(x=>x.id===danoId); d.fotos=d.fotos.filter(m=>m.id!==id); }
   else r.media[slot]=(r.media[slot]||[]).filter(m=>m.id!==id);
   await St.del("f:"+id); delete FOTOS[id];
+  await St.del("t:"+id); delete THUMBS[id];
   if(VIDEOS[id]){ URL.revokeObjectURL(VIDEOS[id]); delete VIDEOS[id]; }
   await guardaFicha(); pinta(true);
 }
 
 
 /* ══════════ CONEXIÓN CON GOOGLE DRIVE ══════════ */
-let CFG = { url:"https://drive-camperspot.miguelduchs.workers.dev", clave:"" };
+let CFG = { url:"https://drive-camperspot.miguelduchs.workers.dev", clave:"", raizId:"" };
 const hayDrive = ()=> !!(CFG.url && CFG.clave);
 const corta = t => { t=String(t||"").replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim();
   return t.length>180 ? t.slice(0,180)+"…" : t; };
@@ -605,11 +640,21 @@ async function subeArchivo(t){
   t.media.driveId = respuesta && respuesta.id || "";
   t.media.pct = 100;
   delete ARCHIVOS[t.id];
+  if(t.media.tipo==="video" && VIDEOS[t.id]){   // ya está en Drive: liberamos la memoria
+    URL.revokeObjectURL(VIDEOS[t.id]); delete VIDEOS[t.id];
+  }
 }
 
+async function carpetaRaiz(){
+  if(CFG.raizId) return CFG.raizId;
+  const { carpetaId } = await api("/carpeta", { ruta:[RAIZ] });
+  CFG.raizId = carpetaId; await guardaCfg();
+  return carpetaId;
+}
 async function carpetaArriendo(r){
   if(r.driveCarpeta) return r.driveCarpeta;
-  const { carpetaId } = await api("/carpeta", { ruta:[RAIZ, nombreCarpeta(r)] });
+  const padreId = await carpetaRaiz();
+  const { carpetaId } = await api("/carpeta", { ruta:[nombreCarpeta(r)], padreId });
   r.driveCarpeta = carpetaId;
   if(S.r && S.r.id===r.id) S.r.driveCarpeta = carpetaId;
   return carpetaId;
@@ -618,8 +663,8 @@ async function carpetaArriendo(r){
 async function carpetaSub(r, sub){
   r.driveSubs = r.driveSubs || {};
   if(r.driveSubs[sub]) return r.driveSubs[sub];
-  await carpetaArriendo(r);
-  const { carpetaId } = await api("/carpeta", { ruta:[RAIZ, nombreCarpeta(r), sub] });
+  const padreId = await carpetaArriendo(r);
+  const { carpetaId } = await api("/carpeta", { ruta:[sub], padreId });
   r.driveSubs[sub] = carpetaId;
   if(S.r && S.r.id===r.id){ S.r.driveSubs = S.r.driveSubs||{}; S.r.driveSubs[sub]=carpetaId; }
   return carpetaId;
@@ -695,6 +740,7 @@ function vistaAjustes(){
   document.getElementById("cfgOk").onclick=async()=>{
     CFG.url=document.getElementById("cfgUrl").value.trim();
     CFG.clave=document.getElementById("cfgClave").value.trim();
+    CFG.raizId="";
     await guardaCfg(); flash("Conexión guardada"); pinta();
   };
   document.getElementById("cfgTest").onclick=async()=>{
@@ -747,7 +793,7 @@ function pintaPie(){
     <button class="nav" data-nav="-1" ${ix<=0?"disabled":""} aria-label="Etapa anterior">‹</button>
     <div class="est"><b>${ETAPAS[ix].t} · ${en}/${et}</b>${pendientes()?`Subiendo ${pendientes()} archivo(s)…`:g}</div>
     <button class="nav" data-nav="1" ${ix>=ETAPAS.length-1?"disabled":""} aria-label="Etapa siguiente">›</button>
-    <button class="btn acento sm" data-act="salir"><span class="larga">Guardar y&nbsp;</span>salir</button>`;
+    <button class="btn acento sm salir" data-act="salir">Guardar y salir</button>`;
 }
 
 /* ---------- inicio ---------- */
@@ -1061,8 +1107,9 @@ function slotHTML(s,r){
 function tiraHTML(m,slot,danoId){
   const cuerpo = m.tipo==="foto"
     ? (FOTOS[m.id]?`<img src="${FOTOS[m.id]}" alt="">`:`<em class="txt">Foto</em>`)
-    : (VIDEOS[m.id]?`<video src="${VIDEOS[m.id]}" muted playsinline preload="metadata"></video><em>Video</em>`
-                   :`<em class="txt">Video<br>no disponible</em>`);
+    : (THUMBS[m.id] ? `<img src="${THUMBS[m.id]}" alt=""><em>Video</em>`
+      : VIDEOS[m.id] ? `<video src="${VIDEOS[m.id]}" muted playsinline preload="metadata"></video><em>Video</em>`
+      : `<em class="txt">Video</em>`);
   const est = m.estado || (m.driveId ? "listo" : "");
   const marca = est==="listo" ? `<i class="ok">✓</i>`
     : est==="error" ? `<i class="err">!</i>`
@@ -1077,18 +1124,21 @@ function verMedia(id,slot,danoId){
   const foto=FOTOS[id], video=VIDEOS[id], m=buscaMedia(id);
   const cuerpo = foto ? `<img src="${foto}" alt="" style="width:100%;border-radius:4px;display:block">`
     : video ? `<video src="${video}" controls playsinline style="width:100%;border-radius:4px;display:block;background:#000"></video>`
-    : (m && m.driveId)
-      ? `<div class="aviso" style="margin:0"><b>Video guardado en Drive.</b><br>Ábrelo desde la carpeta del arriendo.</div>
-         <a class="btn ghost wide" style="margin-top:10px;text-decoration:none"
-            href="https://drive.google.com/file/d/${m.driveId}/view" target="_blank" rel="noopener">Abrir en Drive</a>`
-      : `<div class="aviso" style="margin:0"><b>Video no disponible en este teléfono.</b><br>Se subió desde otro dispositivo o la sesión se cerró antes de terminar.</div>`;
+    : (m && m.driveId && THUMBS[id]) ? `<img src="${THUMBS[id]}" alt="" style="width:100%;border-radius:4px;display:block">`
+    : "";
+  const extra = (m && m.driveId && m.tipo==="video")
+    ? `<a class="btn wide" style="margin-top:10px;text-decoration:none"
+          href="https://drive.google.com/file/d/${m.driveId}/view" target="_blank" rel="noopener">Reproducir en Drive</a>`
+    : "";
+  const faltante = (!foto && !video && !(m&&m.driveId))
+      ? `<div class="aviso" style="margin:0"><b>Archivo no disponible aquí.</b><br>No alcanzó a subirse o se adjuntó desde otro dispositivo. Vuelve a adjuntarlo.</div>` : "";
   const est = m && (m.estado || (m.driveId?"listo":""));
   const aviso = est==="error"
       ? `<div class="aviso" style="margin:10px 0 0"><b>No se pudo subir.</b><br>${esc(m.detalle||"Error desconocido")}</div>`
     : est==="listo" ? `<p class="hint">Respaldado en Drive.</p>`
     : est ? `<p class="hint">Subiendo… ${m.pct||0}%</p>`
     : hayDrive() ? "" : `<p class="hint">Solo en este dispositivo. Drive no está conectado.</p>`;
-  modal(`${cuerpo}${aviso}<div class="row" style="margin-top:12px">
+  modal(`${cuerpo}${faltante}${extra}${aviso}<div class="row" style="margin-top:12px">
     ${est==="error"?`<button class="btn acento" data-act="reintentar" style="flex:1">Reintentar</button>`:""}
     <button class="btn ghost" data-act="borrarMedia" style="flex:1">Eliminar</button></div>`);
 }
