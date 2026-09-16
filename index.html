@@ -701,55 +701,71 @@ const linkCarpeta = id => id ? `https://drive.google.com/drive/folders/${id}` : 
 
 /* ── Videos subidos con la app de Drive ────────────────────────────────
    Safari congela el JavaScript al salir de la pestaña, así que una página web
-   no puede subir en segundo plano. La app de Drive sí. El operario sube ahí y
-   al volver leemos la carpeta para saber qué llegó. */
+   no puede subir en segundo plano. La app de Drive sí. Cada tema tiene su
+   propia carpeta: lo que esté adentro es ese video, sin tener que asignarlo. */
 const SLOTS_VIDEO = [
-  {k:"v_ext", t:"Exterior y bajo", n:"1-exterior-y-bajo"},
-  {k:"v_int", t:"Interior",        n:"2-interior"},
-  {k:"v_tec", t:"Techo",           n:"3-techo"},
+  {k:"v_ext", t:"Exterior y bajo", carpeta:"1 Exterior y bajo", archivo:"1-exterior-y-bajo"},
+  {k:"v_int", t:"Interior",        carpeta:"2 Interior",        archivo:"2-interior"},
+  {k:"v_tec", t:"Techo",           carpeta:"3 Techo",           archivo:"3-techo"},
 ];
-async function abreCarpetaVideos(){
+
+async function carpetaVideo(r, slotKey){
+  const def = SLOTS_VIDEO.find(x=>x.k===slotKey);
+  const clave = "Videos/"+def.carpeta;
+  r.driveSubs = r.driveSubs || {};
+  if(r.driveSubs[clave]) return r.driveSubs[clave];
+  const padreId = await carpetaSub(r, "Videos");
+  const { carpetaId } = await api("/carpeta", { ruta:[def.carpeta], padreId });
+  r.driveSubs[clave] = carpetaId;
+  if(S.r && S.r.id===r.id){ S.r.driveSubs = S.r.driveSubs||{}; S.r.driveSubs[clave]=carpetaId; }
+  await guardaFicha();
+  return carpetaId;
+}
+
+async function abreCarpetaVideo(slotKey){
   const r=S.r;
-  flash("Preparando la carpeta…", true);
+  const def = SLOTS_VIDEO.find(x=>x.k===slotKey);
+  flash("Abriendo la carpeta de "+def.t.toLowerCase()+"…", true);
   try{
-    const id = await carpetaSub(r, "Videos");
-    await guardaFicha();
-    flash("Abriendo Drive");
+    const id = await carpetaVideo(r, slotKey);
+    flash("Sube el video en Drive y vuelve acá");
     window.open(linkCarpeta(id), "_blank", "noopener");
   }catch(e){ flash("No se pudo abrir: "+corta(e.message)); }
 }
+
+/* Lee las carpetas de video y deja el nombre ordenado */
 async function revisaVideosDrive(silencioso){
-  const r=S.r; if(!r || !hayDrive() || !(r.driveSubs||{}).Videos) return;
-  try{
-    if(!silencioso) flash("Buscando videos…", true);
-    const d = await api("/listar?carpetaId="+encodeURIComponent(r.driveSubs.Videos));
-    const previos = (r.driveVideos||[]).length;
-    const mapa = new Map((r.driveVideos||[]).map(v=>[v.id,v]));
-    r.driveVideos = (d.files||[])
-      .filter(f=>f.mimeType && f.mimeType.startsWith("video"))
-      .map(f=>({ id:f.id, nombre:f.name, mb:Math.round(Number(f.size||0)/1048576),
-                 slot:(mapa.get(f.id)||{}).slot || "" }));
-    await guardaFicha();
-    const nuevos = r.driveVideos.length - previos;
-    if(!silencioso || nuevos>0)
-      flash(r.driveVideos.length ? `${r.driveVideos.length} video(s) en la carpeta` : "Todavía no hay videos");
-    pinta(true);
-  }catch(e){ if(!silencioso) flash("No se pudo revisar: "+corta(e.message)); }
-}
-async function asignaSlot(fileId, slot){
-  const r=S.r, v=(r.driveVideos||[]).find(x=>x.id===fileId); if(!v) return;
-  (r.driveVideos||[]).forEach(x=>{ if(x.slot===slot && x.id!==fileId) x.slot=""; });
-  v.slot = slot;
-  await guardaFicha(); pinta(true);
-  if(slot){
-    const def = SLOTS_VIDEO.find(x=>x.k===slot);
-    const ext = EXT(v.nombre) || "mp4";
-    try{ await api("/renombrar", { fileId, nombre:`${def.n}.${ext}` });
-         v.nombre = `${def.n}.${ext}`; await guardaFicha(); pinta(true);
-    }catch(e){ flash("Se asignó, pero no se pudo renombrar"); }
+  const r=S.r; if(!r || !hayDrive()) return;
+  let encontrados=0, nuevos=0;
+  r.driveVids = r.driveVids || {};
+  for(const def of SLOTS_VIDEO){
+    const id = (r.driveSubs||{})["Videos/"+def.carpeta];
+    if(!id) continue;
+    try{
+      const d = await api("/listar?carpetaId="+encodeURIComponent(id));
+      const archivos = (d.files||[])
+        .filter(f=>f.mimeType && f.mimeType.startsWith("video"))
+        .map(f=>({ id:f.id, nombre:f.name, mb:Math.round(Number(f.size||0)/1048576) }));
+      const antes = (r.driveVids[def.k]||[]).length;
+      r.driveVids[def.k] = archivos;
+      encontrados += archivos.length;
+      nuevos += Math.max(0, archivos.length - antes);
+      // Nombre ordenado: se renombra solo el primero de cada carpeta
+      for(let i=0;i<archivos.length;i++){
+        const esperado = `${def.archivo}${i?"-"+(i+1):""}.${EXT(archivos[i].nombre)}`;
+        if(archivos[i].nombre !== esperado){
+          try{ await api("/renombrar", { fileId:archivos[i].id, nombre:esperado });
+               archivos[i].nombre = esperado; }catch(e){}
+        }
+      }
+    }catch(e){ if(!silencioso) flash("No se pudo revisar: "+corta(e.message)); }
   }
+  await guardaFicha();
+  if(!silencioso || nuevos>0)
+    flash(encontrados ? `${encontrados} video(s) en Drive` : "Todavía no hay videos en las carpetas");
+  pinta(true);
 }
-const videoDe = (r,slot) => (r.driveVideos||[]).find(v=>v.slot===slot);
+const videosDe = (r,slot) => (r.driveVids||{})[slot] || [];
 
 /* Sube ficha.json y resumen.txt */
 async function subeDocumentos(r){
@@ -1089,44 +1105,35 @@ function bloqueVideos(r){
 }
 
 function secEntrega(r){
-  const vids = r.driveVideos||[];
-  const sinAsignar = vids.filter(v=>!v.slot);
-  return `<div class="card"><h3>Videos del recorrido</h3><div class="pad">
-    ${hayDrive() ? `
-      <button class="btn acento wide" data-act="abrirVideos">Subir videos desde Drive</button>
-      <p class="hint">Recomendado. La app de Drive sigue subiendo aunque cierres el checklist o bloquees la pantalla. Cuando vuelvas, toca Revisar.</p>
-      <div class="row" style="margin-top:10px">
-        <button class="btn ghost sm" data-act="revisarVideos">Revisar qué llegó</button>
-        ${r.driveSubs&&r.driveSubs.Videos?`<a class="btn ghost sm" style="text-decoration:none" target="_blank" rel="noopener"
-           href="${linkCarpeta(r.driveSubs.Videos)}">Abrir carpeta</a>`:""}
-      </div>`
-    : `<div class="aviso" style="margin:0"><b>Drive sin conectar.</b><br>
-        <button class="btn ghost sm" data-act="ajustes" style="margin-top:8px">Conectar</button></div>`}
-  </div>
+  return `<div class="card"><h3>Videos del recorrido</h3>
+  ${hayDrive()?"":`<div class="pad"><div class="aviso" style="margin:0"><b>Drive sin conectar.</b><br>
+     <button class="btn ghost sm" data-act="ajustes" style="margin-top:8px">Conectar</button></div></div>`}
 
   ${SLOTS_VIDEO.map(sv=>{
-    const asignado = videoDe(r, sv.k);
+    const enDrive = videosDe(r, sv.k);
     const local = (r.media[sv.k]||[]);
+    const listo = enDrive.length || local.length;
     return `<div class="slot">
-      <h4>${sv.t} ${asignado||local.length?`<span class="badge ok">Listo</span>`:`<span class="badge warn">Pendiente</span>`}</h4>
-      ${asignado
-        ? `<p>${esc(asignado.nombre)}${asignado.mb?` · ${asignado.mb} MB`:""}</p>
-           <div class="row">
-             <a class="btn ghost sm" style="text-decoration:none" target="_blank" rel="noopener"
-                href="https://drive.google.com/file/d/${asignado.id}/view">Reproducir</a>
-             <button class="btn ghost sm" data-asigna="${asignado.id}" data-slot="">Quitar</button>
-           </div>`
-        : local.length
-          ? `<div class="tiras">${local.map(m=>tiraHTML(m,sv.k)).join("")}</div>`
-          : sinAsignar.length
-            ? `<p>Elige cuál de los videos de la carpeta corresponde:</p>
-               <div class="row">${sinAsignar.map(v=>
-                 `<button class="btn ghost sm" data-asigna="${v.id}" data-slot="${sv.k}">${esc(v.nombre)}${v.mb?` · ${v.mb}MB`:""}</button>`).join("")}</div>`
-            : `<p>Sube el video desde Drive, o adjúntalo aquí si estás en WiFi.</p>
-               <button class="btn ghost sm" data-add="${sv.k}" data-tipo="video">Adjuntar desde aquí</button>`}
+      <h4>${sv.t} ${listo?`<span class="badge ok">${enDrive.length||local.length} archivo(s)</span>`:`<span class="badge warn">Pendiente</span>`}</h4>
+      <p>${sv.d}</p>
+      ${hayDrive()?`
+        <div class="row">
+          <button class="btn acento sm" data-video="${sv.k}">Subir en Drive</button>
+          ${(r.driveSubs||{})["Videos/"+sv.n]?`<a class="btn ghost sm" style="text-decoration:none" target="_blank" rel="noopener"
+             href="${linkCarpeta(r.driveSubs["Videos/"+sv.n])}">Ver carpeta</a>`:""}
+        </div>`:""}
+      ${enDrive.length?`<ul class="arch">${enDrive.map(v=>`<li>
+          <a href="https://drive.google.com/file/d/${v.id}/view" target="_blank" rel="noopener"><code>${esc(v.nombre)}</code></a>
+          <small>${v.mb?v.mb+" MB":""}</small></li>`).join("")}</ul>`:""}
+      ${local.length?`<div class="tiras">${local.map(m=>tiraHTML(m,sv.k)).join("")}</div>`:""}
+      ${!listo?`<button class="btn ghost sm" data-add="${sv.k}" data-tipo="video" style="margin-top:8px">Adjuntar desde aquí</button>`:""}
     </div>`;
   }).join("")}
-  </div>
+
+  <div class="pad" style="border-top:1px solid var(--linea)">
+    <button class="btn ghost wide" data-act="revisarVideos">Revisar qué llegó a Drive</button>
+    <p class="hint">Sube desde la app de Drive: sigue subiendo aunque cierres el checklist o bloquees la pantalla. Al volver acá se revisa solo.</p>
+  </div></div>
 
   <div class="card"><h3>Tablero y firma</h3>
     ${slotHTML(SLOTS.find(x=>x.k==="f_tab_s"),r)}
@@ -1340,8 +1347,6 @@ document.addEventListener("click", async ev=>{
   if(d.abre){ await abreFicha(d.abre); return; }
   if(d.chk!=null){ S.r.prep[d.chk]=!S.r.prep[d.chk];
     t.setAttribute("aria-pressed",!!S.r.prep[d.chk]); pintaRail(); pintaPie(); guardaFicha(); return; }
-  if(d.asigna!==undefined && d.slot!==undefined && t.dataset.asigna){
-    await asignaSlot(d.asigna, d.slot); return; }
   if(d.adic){
     const v=d.adic; let a=(S.r.adicionales||[]).slice();
     if(v==="Ninguno") a = a.includes("Ninguno") ? [] : ["Ninguno"];
@@ -1362,7 +1367,7 @@ document.addEventListener("click", async ev=>{
   switch(d.act){
     case "verArchivo": S.vista="archivo"; pinta(); break;
     case "ajustes": S.vista="ajustes"; pinta(); break;
-    case "abrirVideos": await abreCarpetaVideos(); break;
+    case "abrirVideo": await abreCarpetaVideo(t.dataset.slot); break;
     case "revisarVideos": await revisaVideosDrive(false); break;
     case "prepararCarpeta":
       try{ flash("Creando carpeta…",true); await carpetaSub(S.r,"Videos"); await guardaFicha(true);
