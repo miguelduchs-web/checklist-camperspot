@@ -368,7 +368,7 @@ const FASES=[
   {k:"lista",   t:"Listas para cerrar", d:"Sin nada pendiente"},
   {k:"datos",   t:"Faltan datos",       d:"Sin patente, cliente o fechas"},
 ];
-const cuentaVideos = r => SLOTS_VIDEO.reduce((a,d)=>a+videosDe(r,d.k).length+((r.media&&r.media[d.k])||[]).length,0);
+const cuentaVideos = r => SLOTS_VIDEO.reduce((a,d)=>a+videosDe(r,d.k).length,0);
 const progTotal = r => ETAPAS.reduce((a,e)=>{const[n,t]=prog(r,e.k);return[a[0]+n,a[1]+t]},[0,0]);
 
 /* ══════════ CARGA ══════════ */
@@ -722,24 +722,27 @@ async function carpetaVideo(r, slotKey){
   return carpetaId;
 }
 
-/* Lee las carpetas de video y deja el nombre ordenado */
+/* Lee las carpetas de video, deja el nombre ordenado y avisa qué encontró.
+   No filtra por tipo: cada carpeta es exclusiva de ese video, así que lo que
+   esté adentro cuenta. iOS a veces reporta los .MOV como tipo genérico. */
 async function revisaVideosDrive(silencioso){
   const r=S.r; if(!r || !hayDrive()) return;
-  let encontrados=0, nuevos=0;
+  if(S.revisando) return;
+  S.revisando=true; if(!silencioso) pinta(true);
+  let total=0, nuevos=0, sueltos=0, fallo="";
   r.driveVids = r.driveVids || {};
-  for(const def of SLOTS_VIDEO){
-    const id = (r.driveSubs||{})["Videos/"+def.carpeta];
-    if(!id) continue;
-    try{
+  try{
+    for(const def of SLOTS_VIDEO){
+      const id = (r.driveSubs||{})["Videos/"+def.carpeta];
+      if(!id) continue;
       const d = await api("/listar?carpetaId="+encodeURIComponent(id));
       const archivos = (d.files||[])
-        .filter(f=>f.mimeType && f.mimeType.startsWith("video"))
+        .filter(f=>f.mimeType !== "application/vnd.google-apps.folder")
         .map(f=>({ id:f.id, nombre:f.name, mb:Math.round(Number(f.size||0)/1048576) }));
       const antes = (r.driveVids[def.k]||[]).length;
       r.driveVids[def.k] = archivos;
-      encontrados += archivos.length;
+      total += archivos.length;
       nuevos += Math.max(0, archivos.length - antes);
-      // Nombre ordenado: se renombra solo el primero de cada carpeta
       for(let i=0;i<archivos.length;i++){
         const esperado = `${def.archivo}${i?"-"+(i+1):""}.${EXT(archivos[i].nombre)}`;
         if(archivos[i].nombre !== esperado){
@@ -747,12 +750,21 @@ async function revisaVideosDrive(silencioso){
                archivos[i].nombre = esperado; }catch(e){}
         }
       }
-    }catch(e){ if(!silencioso) flash("No se pudo revisar: "+corta(e.message)); }
-  }
-  await guardaFicha();
-  if(!silencioso || nuevos>0)
-    flash(encontrados ? `${encontrados} video(s) en Drive` : "Todavía no hay videos en las carpetas");
-  pinta(true);
+    }
+    // Archivos dejados en la carpeta Videos general en vez de la del tema
+    const gen = (r.driveSubs||{}).Videos;
+    if(gen){
+      const d = await api("/listar?carpetaId="+encodeURIComponent(gen));
+      sueltos = (d.files||[]).filter(f=>f.mimeType!=="application/vnd.google-apps.folder").length;
+    }
+    r.revisado = Date.now();
+    await guardaFicha(true);
+  }catch(e){ fallo = corta(e.message||e); }
+  S.revisando=false; pinta(true);
+  if(fallo) flash("No se pudo revisar: "+fallo);
+  else if(sueltos) flash(`${sueltos} archivo(s) están en la carpeta Videos, no en la del tema`);
+  else if(!silencioso) flash(total ? `${total} video(s) confirmados` : "Las carpetas están vacías");
+  else if(nuevos) flash(`${nuevos} video(s) nuevo(s)`);
 }
 const videosDe = (r,slot) => (r.driveVids||{})[slot] || [];
 
@@ -990,7 +1002,9 @@ function vistaFlota(){
 /* ---------- ficha ---------- */
 function vistaFicha(){
   const r=S.r;
-  if(S.etapa==="entrega" && hayDrive()) setTimeout(alistaVideos, 60);
+  if(S.etapa==="entrega" && hayDrive()){
+    setTimeout(async()=>{ await alistaVideos(); revisaVideosDrive(true); }, 60);
+  }
   const secciones={datos:secDatos,prep:secPrep,entrega:secEntrega,revision:secRevision,reporte:secReporte};
   const ix=ETAPAS.findIndex(e=>e.k===S.etapa);
   app.innerHTML = `${hayDrive()?"":`<div class="aviso" style="margin:12px 0 0"><b>Drive sin conectar.</b><br>
@@ -1062,26 +1076,27 @@ function secEntrega(r){
 
   ${SLOTS_VIDEO.map(def=>{
     const enDrive = videosDe(r, def.k);
-    const local = (r.media[def.k]||[]);
     const carpetaId = (r.driveSubs||{})["Videos/"+def.carpeta];
-    const listo = enDrive.length || local.length;
+    const listo = enDrive.length;
     return `<div class="slot">
-      <h4>${def.t} ${listo?`<span class="badge ok">${enDrive.length||local.length}</span>`:`<span class="badge warn">Pendiente</span>`}</h4>
+      <h4>${def.t} ${listo?`<span class="badge ok">✓ ${enDrive.length} en Drive</span>`:`<span class="badge warn">Pendiente</span>`}</h4>
       ${hayDrive() ? (carpetaId
         ? `<a class="btn acento sm" style="text-decoration:none" target="_blank" rel="noopener"
              href="${linkCarpeta(carpetaId)}">Subir en Drive</a>`
         : `<span class="badge warn">Preparando carpeta…</span>`) : ""}
-      ${enDrive.length?`<ul class="arch">${enDrive.map(v=>`<li>
-          <a href="https://drive.google.com/file/d/${v.id}/view" target="_blank" rel="noopener"><code>${esc(v.nombre)}</code></a>
-          <small>${v.mb?v.mb+" MB":""}</small></li>`).join("")}</ul>`:""}
-      ${local.length?`<div class="tiras">${local.map(m=>tiraHTML(m,def.k)).join("")}</div>`:""}
-      ${!listo?`<button class="btn ghost sm" data-add="${def.k}" data-tipo="video" style="margin-top:8px">Adjuntar aquí (con WiFi)</button>`:""}
+      ${enDrive.length
+        ? `<ul class="arch">${enDrive.map(v=>`<li>
+            <a href="https://drive.google.com/file/d/${v.id}/view" target="_blank" rel="noopener"><code>${esc(v.nombre)}</code></a>
+            <small>${v.mb?v.mb+" MB · ":""}confirmado en Drive</small></li>`).join("")}</ul>`
+        : `<p class="hint" style="margin-top:8px">${r.revisado?"Nada en esta carpeta todavía.":"Sube el video y después toca Revisar."}</p>`}
     </div>`;
   }).join("")}
 
   <div class="pad" style="border-top:1px solid var(--linea)">
-    <button class="btn ghost wide" data-act="revisarVideos">Revisar qué llegó a Drive</button>
-    ${listas?"":`<p class="hint">Las carpetas se están creando. Si tarda, toca Revisar.</p>`}
+    <button class="btn ghost wide" data-act="revisarVideos">${S.revisando?"Revisando…":"Revisar qué llegó a Drive"}</button>
+    <p class="hint">${!listas?"Las carpetas se están creando.":
+      r.revisado?"Última revisión: "+new Date(r.revisado).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"}):
+      "Después de subir en Drive, toca Revisar para confirmar."}</p>
   </div></div>
 
   <div class="card"><h3>Tablero y firma</h3>
@@ -1235,12 +1250,9 @@ function slotHTML(s,r){
   return `<div class="slot"><h4>${s.t} ${ms.length?`<span class="badge ok">${ms.length}</span>`:`<span class="badge warn">Pendiente</span>`}</h4>
     <p>${s.d}</p>
     <div class="row">
-      ${s.tipo==="video"
-        ? `<button class="btn ghost sm" data-add="${s.k}" data-tipo="video">Adjuntar video</button>`
-        : `<button class="btn ghost sm" data-add="${s.k}" data-tipo="foto" data-cam="1">Tomar foto</button>
-           <button class="btn ghost sm" data-add="${s.k}" data-tipo="foto">Elegir archivo</button>`}
+      <button class="btn ghost sm" data-add="${s.k}" data-tipo="foto" data-cam="1">Tomar foto</button>
+      <button class="btn ghost sm" data-add="${s.k}" data-tipo="foto">Elegir archivo</button>
     </div>
-    ${s.tipo==="video"?`<p class="hint">Graba con la app de cámara del teléfono y adjunta el archivo desde la galería. Así conserva la resolución original.</p>`:""}
     <div class="tiras">${ms.map(m=>tiraHTML(m,s.k)).join("")}</div></div>`;
 }
 function tiraHTML(m,slot,danoId){
