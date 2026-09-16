@@ -1,0 +1,1144 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Checklist Motorhome — Camperspot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --oliva:#354C00; --oliva-osc:#26380B; --oliva-cl:#4A6A0A;
+  --salvia:#95AA71; --salvia-cl:#C6D4B2; --salvia-pal:#EBF0E2;
+  --fondo:#F0F3EA; --panel:#fff;
+  --tinta:#1A1E12; --gris:#6E7663; --linea:#D6DCC8;
+  --ambar:#E8AC1B; --ambar-osc:#C08D08;
+  --ok:#46731A; --dano:#A8341F; --alerta:#9A6B10;
+  --r:6px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  background:var(--fondo); color:var(--tinta);
+  font-family:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-size:16px; line-height:1.45;
+}
+h1,h2,h3,h4,.cond{font-family:"Barlow Condensed","Barlow Semi Condensed",system-ui,sans-serif;font-weight:600;letter-spacing:.01em}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+.wrap{max-width:820px;margin:0 auto;padding:0 14px 120px}
+
+/* ---------- barra superior ---------- */
+.top{background:var(--oliva);color:#fff;position:sticky;top:0;z-index:40;box-shadow:0 1px 0 rgba(0,0,0,.18)}
+.top-in{max-width:820px;margin:0 auto;padding:9px 14px;display:flex;align-items:center;gap:10px}
+.logo{width:36px;height:36px;border-radius:5px;display:block;flex:0 0 36px}
+.marca{font-family:"Barlow Condensed";font-size:21px;font-weight:700;line-height:1;letter-spacing:.02em;text-transform:uppercase}
+.marca span{display:block;font-size:11px;font-weight:500;color:var(--salvia-cl);letter-spacing:.14em;font-family:"Barlow"}
+.suc-sw{margin-left:auto;display:flex;background:var(--oliva-osc);border-radius:4px;overflow:hidden}
+.suc-sw button{background:none;border:0;color:#BFCCAB;padding:8px 12px;font-family:"Barlow Condensed";font-size:16px;font-weight:600}
+.suc-sw button[aria-pressed=true]{background:var(--salvia);color:#26380B}
+
+/* ---------- medidor de etapas ---------- */
+.rail{background:var(--oliva-osc);padding:9px 14px 11px;border-bottom:2px solid var(--salvia)}
+.rail-in{max-width:820px;margin:0 auto;display:flex;gap:5px}
+.gauge{flex:1;background:none;border:0;padding:0;text-align:left}
+.gauge b{display:block;font-family:"Barlow Condensed";font-size:14px;font-weight:600;color:#A9BC8C;line-height:1.2}
+.gauge[aria-current=true] b{color:var(--ambar)}
+.gauge i{display:block;font-style:normal;font-size:11px;color:#8FA173;font-variant-numeric:tabular-nums}
+.gauge .bars{display:flex;gap:2px;margin:5px 0 4px}
+.gauge .bars s{flex:1;height:5px;background:#4C6317;text-decoration:none;border-radius:1px}
+.gauge .bars s.on{background:var(--salvia)}
+.gauge[data-full=true] .bars s.on{background:var(--salvia-cl)}
+
+/* ---------- generico ---------- */
+.card{background:var(--panel);border:1px solid var(--linea);border-radius:var(--r);margin:12px 0}
+.card>h3{margin:0;padding:11px 14px;border-bottom:1px solid var(--linea);font-size:19px;display:flex;align-items:center;gap:8px;background:var(--salvia-pal);border-radius:var(--r) var(--r) 0 0;color:var(--oliva)}
+.card>h3 em{margin-left:auto;font-style:normal;font-family:"Barlow";font-size:12px;color:var(--gris);font-variant-numeric:tabular-nums}
+.pad{padding:14px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:520px){.grid{grid-template-columns:1fr}}
+label.f{display:block;margin-bottom:10px}
+label.f>span{display:block;font-size:13px;color:var(--gris);margin-bottom:3px}
+input[type=text],input[type=date],input[type=number],select,textarea{
+  width:100%;padding:11px 10px;border:1px solid var(--linea);border-radius:4px;background:#FBFCF8;min-height:46px
+}
+textarea{min-height:78px;resize:vertical}
+input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid var(--oliva-cl);outline-offset:1px}
+.hint{font-size:13px;color:var(--gris);margin:6px 0 0}
+h2.tit{color:var(--oliva);text-transform:uppercase;letter-spacing:.03em}
+
+/* ---------- items ---------- */
+.items{list-style:none;margin:0;padding:0}
+.items li{border-bottom:1px solid #EDF0E5}
+.items li:last-child{border-bottom:0}
+.chk{display:flex;align-items:center;gap:11px;width:100%;background:none;border:0;padding:11px 14px;text-align:left;font-size:15.5px}
+.chk .box{flex:0 0 24px;height:24px;border:2px solid #B4BD9E;border-radius:4px;position:relative}
+.chk[aria-pressed=true]{background:#F1F6E9}
+.chk[aria-pressed=true] .box{background:var(--ok);border-color:var(--ok)}
+.chk[aria-pressed=true] .box:after{content:"";position:absolute;left:7px;top:3px;width:5px;height:11px;border:solid #fff;border-width:0 2.5px 2.5px 0;transform:rotate(42deg)}
+
+.tri{padding:9px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.tri>p{margin:0;flex:1 1 190px;font-size:15.5px}
+.tri .set{display:flex;gap:4px}
+.tri .set button{border:1px solid var(--linea);background:#FBFCF8;border-radius:4px;padding:8px 11px;font-family:"Barlow Condensed";font-weight:600;font-size:14px;color:var(--gris);min-width:46px}
+.tri .set button[aria-pressed=true][data-v=ok]{background:var(--ok);border-color:var(--ok);color:#fff}
+.tri .set button[aria-pressed=true][data-v=dano]{background:var(--dano);border-color:var(--dano);color:#fff}
+.tri textarea{margin-top:2px;flex-basis:100%;min-height:52px}
+.tri .resp{flex-basis:100%;display:flex;gap:8px;flex-wrap:wrap}
+.tri .tiras{flex-basis:100%;margin-top:0}
+.tri .tiras:empty{display:none}
+
+/* ---------- media ---------- */
+.slot{padding:12px 14px;border-bottom:1px solid #EDF0E5}
+.slot:last-child{border-bottom:0}
+.slot h4{margin:0 0 2px;font-size:17px}
+.slot p{margin:0 0 9px;font-size:13px;color:var(--gris)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid var(--oliva);background:var(--oliva);color:#fff;border-radius:4px;padding:11px 15px;font-family:"Barlow Condensed";font-weight:600;font-size:16px;min-height:46px}
+.btn.ghost{background:#fff;color:var(--tinta)}
+.btn.acento{background:var(--ambar);border-color:var(--ambar-osc);color:#2B2000;
+  box-shadow:0 1px 0 var(--ambar-osc)}
+.btn.acento:active{background:var(--ambar-osc);box-shadow:none;transform:translateY(1px)}
+.btn.wide{width:100%}
+.btn.sm{padding:7px 11px;min-height:38px;font-size:14px}
+.btn[disabled]{opacity:.45;pointer-events:none}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.tiras{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.tira{position:relative;width:88px;height:88px;border-radius:4px;overflow:hidden;border:1px solid var(--linea);background:var(--oliva-osc);padding:0;display:block}
+.tira .txt{position:static;display:flex;align-items:center;justify-content:center;height:100%;color:#C6D4B2;font-size:11px;text-align:center;padding:4px;background:none}
+.suc-fija{font-family:"Barlow Condensed";font-weight:600;font-size:16px;color:var(--salvia-cl);padding:8px 4px}
+.tira img,.tira video{width:100%;height:100%;object-fit:cover;display:block}
+.tira[data-estado=local]{border-color:var(--alerta);border-style:dashed}
+.tira[data-estado=listo]{border-color:var(--ok)}
+.tira[data-estado=error]{border-color:var(--dano)}
+.tira i{position:absolute;top:3px;right:3px;width:20px;height:20px;border-radius:50%;font-style:normal;
+  font-size:12px;line-height:20px;text-align:center;color:#fff;font-weight:700}
+.tira i.ok{background:var(--ok)}
+.tira i.err{background:var(--dano)}
+.pb-caja{position:absolute;left:3px;right:3px;bottom:3px;height:4px;background:rgba(255,255,255,.35);border-radius:2px;overflow:hidden}
+.pb{display:block;height:100%;background:var(--ambar);width:0;transition:width .2s}
+.tira em{position:absolute;left:0;right:0;bottom:0;background:rgba(26,30,18,.78);color:#fff;font-style:normal;font-size:10.5px;padding:2px 4px;text-align:center}
+.badge{display:inline-block;font-family:"Barlow Condensed";font-weight:600;font-size:12.5px;padding:2px 7px;border-radius:3px;background:#E3E9D7;color:#54603F}
+.badge.ok{background:#E2EFD2;color:var(--ok)}
+.badge.warn{background:#FBF0D6;color:#7A5409}
+.badge.bad{background:#F5E1DD;color:var(--dano)}
+
+/* ---------- lista fichas ---------- */
+.ficha{display:block;width:100%;text-align:left;background:var(--panel);border:1px solid var(--linea);border-left:5px solid var(--ambar);border-radius:var(--r);padding:12px 14px;margin-bottom:9px}
+.ficha[data-cerrada=true]{border-left-color:var(--ok)}
+.ficha b{font-family:"Barlow Condensed";font-size:20px;display:block;line-height:1.1;color:var(--oliva);letter-spacing:.02em}
+.ficha small{color:var(--gris);font-size:13px}
+.ficha .m{display:flex;gap:8px;align-items:center;margin-top:7px;font-size:12.5px;color:var(--gris);font-variant-numeric:tabular-nums}
+.vacio{border:1px dashed #B6C09E;border-radius:var(--r);padding:26px 18px;text-align:center;color:var(--gris);
+  background:url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHAAAABwCAIAAABJgmMcAAAc/klEQVR42u19eXRUVbrvt/c+59Q5VZWEJCTMiZBAmNEAecigCI0NNFdskKm9YAMODK3LNLS0reKlbbz98Aq2A4PdoNLg8inQ7ZLBdmSS4UmAJMiYAGkikISQpJIaz9l7vz925VAkVZVKUkF4K99iuWINZ/jtb/h9wz6FBk+AVomi4FYIWgG9rUW6nS4GIQQIYYSQ+RLnHIADF++Lz9z0LueMcwD/J1oBBYQxQggD55RRnw66TikFzgEQIAQEA0IgMOQcOAfKQICMEBACigySBAQTQIhzxhj/acGVfjocMUKIUsPl5j6dIQR2K7Rv275zx/T2Santkjq3a5sSY4uzanZZUgiRAYBSXTd8LndNtbOq5Nq/S8qKr5YVXbpcUF5xtbKacg6KDKoFCJE454yxnwRZ6ZZbNcYYG4ZR46QGhVg76ZfRr2/PIf0yhmSkZ3ZMTrVZYxt1QKfLcbnk4pnCY/lnDuWfPlRwMb+iypAIaCpIksQY45zd0hu8ZbRJqKTHQ90eaBMr9+15733/a8LQQePSU/sGfoxzzriwav8K+J2nqW8Bb+GbHS4AFBSdOHBk197Dn+WfPlTl0DUVVJXUKuz/L4BijAHA5Wa6AWkpd40d+avxox7tltLb/AClhh8fhOoA1KBwvzAAIOSGwZ3/98md32z+fPeHhf++KEtg1TAA3AJYWxZQhBDG2OmilMI9fQc9Mn7emBFThFFzzhmjCGOMokndGGecMYyJWBiny/Hlvo+37Fx77EQOIWCzEsYY5/yOBJQQ4vFSjwfu6Zs5e+qSnw2fIm6SUiPqOIZCVugs5+yrfVve++R/HztxVFVBtRBK6Z0EKMaYc+6o5qmdu8yd/vyksY/7wzSj9b1ei4rwyAQTQRK2ff639R/9d1HxpdgYhBBqCQ9AOvWINm8gxOVhlMF//nL+n5//aGC/+zEmAspbjKbf5yAs1pIQqU+PwRN+NlM3anJPfa8bXFUkFm0OEE1AEUKEkIoqmp7afcULH01/6BnVYqXUwBi1tIE3bDQIA3BKqVWzj8j6xT19huWdPlR89ZpVI7cpoBhjxsFRzab8YubrS7d2S+lDqYEQwpjU0p6fPrUVvogx2qVj9wmjH610XD6anysriGAcrUgVHUAJIV4fA5D/8JtVz8z+s0XRhIndYgOPnHhQRlWLbdTQSW0T4r/7/iuDUkUmUcE0CoASQpwumtAm6S/L/vHz+2ZQRhEgwT2jH7sZo5QyxkQ8afKCYYRFvOrf897MvsP2Ht7pqHZaLFHAtLm3LRGpuoZ27dL9vdf3DO4/2qAGqeWALYEmxliqlWauGUKIYGJQY/CA0e+v3NO1c7qjhkqkubl4s2gTIcRRTfv06PfOn3YmJXam1CCkpYoDnHOE0MFDB7/68ivGWLt27YYMGXL33XeL15tzZHHZpeXFC18cf/Jcfqy9WSy16YBKhFTV0D7d+63781fxccmUUUH3Wk43P/vss0mTJhmGIV7s3qP7Dyd+kGU5CpgySjCpqCp9csnoUwUnYu3EaCqmuKm6iWtcNC01/Z3lu1oaTVP+5/X/MQxD1VTFokiSpKoqIdE5KcGEMhofl7x6+a5uKWk1LkoIvnWAYow9XpbQJvHtP25PSuhEaYujKWLFk088iRDSdd0wDMMwCCZRDH0EE0ppUmLnt1/ZHh+X4PGyph280d9BCDGGEJJWLt2S0imDUiNaahImrAuJT4gXlSVRlNKsmulbo1V8oNRI6dRz1ctbMZIYQ004Mm68epLqGvrC03/J7DvSaMkoZLpOQoiiKISQjB4ZqqpyxhFCnPOxY8cCQHTLHIRIBjUy+458/jdvOGoobrzlSY1dw4oq41cTH5s8boFBDakl0eScY4wvFl08fuw4ANhstmPHjhmGgQk2dGPqtKlLX1qq67okRfkaJCIZ1Hhk/MKTZ7//8NMP4uMaF/SlRrlOl5v27t79d/PeZoy1qN+klBJCdn2+61czflVZWXnTokoEAOx2e2lpaXJysqnI0dRTTBhjv5v39rEfDpz/9zlNxZHXpSK/DsQ5Qgi/nL1BU+0AvEXTSnHwVStXVVZWKhYFE4wJJhIBBJRSQLBh/YbefXovXLjQ4/GIJlW0z8411f5f2RsQwpyjyMsROGJjx1UOOnPSwgG9hlNq4BYO60LjnE4nQsjMNQNND2FUfq189erVkydPLioqkiQpuo0jjAmlxoDew2dOWljlaASLwpGtGPZ4WVpq56cefYUxhm8JSQIAt8ctwnrwxAkjSZZ27tw5ePDgNWvW+Kse0YtRGGPG2VOPvtItpZPHy1BkFcjIPoSRx8MXPPYnuy0uijQljMUJEDVNC1MB4ZwbhkEkUlZWtmDBgjEPjjlx4gQhJFqFOIQwZ9xui1v42J88Ho4xig6gGJMaJx08IHPcyJmMsRZlnYGECQC63tW1wZISpRRhJCvyV19+NeTeIWvXrTXXIyrMlDE2btSswQMya5wRsSgc2e3B3OkvYYz5rZrFEIgMGTIkwg/rPh0AnDXO+fPmf/HFF8LzRudKgGOE505/KUL/jBtUT6eLDux3z4ishzhntyBhDwxKo0aNkhWZGrSBT3IYM2bMsj8uE7lTbl5uoCNuPoXinI3Iemhgv3ucrobjB27Ij4BBYdpDz2KMb9nwhWnmGRkZ6enpguGHh759h/ZLX1q69KWld3W9q0f3HtCM2nOohG3qfzxjGLzBo4Yr3yGEvT6W0jHl4zWnLIoW3auM8DZ+PvbnX/zrCyKFTFcwxoyypOSk06dOJyQkuFwuTdOie51C2T1e19T5PYuvFCsKDjMvhcNbk9sDD943Q7VYGaO3uEEkbiM1JTXcQnJglCGMykrLzpw9wxizWq1Rv06EEGNUU20/v/9RlwfCZ2U4fACNtUvjR80U2gq3VgSgGT0zQvoEDgt/szApOQkBAoD8vHyMsa7rLeOCMACMf2BmrF0KH+7C+CbicvP+vQZ1S+kT3ou1qBtNT0uHYENe4t0nn3jyud89J97Ny8trOack+s/dUvv07zXI7eZhQhMOcz+GASPvnQQAjFH4iUSUP+qHbAHc/v37Fy9enJaeBgBnzpwRzLHFfDoFgPuH/FI3wi1bKEARpTTGjocOHNdC9i5Sb7N+bASIeEW8G8oyxFuLFi06dfLUot8uAoCCwgKv1xsqVY2W1Q8bOC7GHi7BDX65GCGvj3ft0uOuzj0BmmvvAjsTNbOljjEW9WNCiBQg4hVZljHGVVVVQQ1Z5PIej+cPL/xh9OjRkixdvHBx7bq1Ua881eFnd3Xp1bVLd6+PhxouCl4PRRh7fezuPiMIkZrWHPZPwTImBp7qI+JyuSorK68JKb92vfx6RUVFRWVFVVVVTXWNy+Vye9wIoYsXLwIKztLFwXfv2f31119jjBFGixct7tSp0yOTHzEMQ5w32lVagxDp7j735Z0+Y9UwUBYpoAAcIejfa2jT+CNjTJIkoYPilUuXLhUUFJw9e/ZcwbmLFy8WFxeXXC0pv17udDobzmZrARWrYoIr/qisrHw2+1mfzyfSzRnTZxS/Vvzss8+aREWMokcR1v4970Xor6F2REghloLZrbhnWmZjHaiotIu0Ki8vb//+/QcOHMjNzb1w4YLb7Q4KFib+GzZvO1AfzSonQogzLr4iVN4cyPF5fQJ0hJBBjezs7MOHD8+dO3f06NFCSSml5uo2341mpA20WzGlLNJMCSGk6zy5bfK2dwusWkzk9TrxyaKioo0bN27dtjU/Lz+Q7gjgRClIQBb430iqFEQimqbVVNcElplFvc4c9BanYJQBQObAzDmz50yfPj0xMTEqsIobdLmrf/lEell5qSwHKWtJQdfBp9OO7bo1Ck0Rdt98882lLy+tqqzyq5JEAv1p0wu9jPXt13fT3zclJSVdvXr15MmT33777Z69ewoLCg3mD0FE8s/Pc86JRBhnR3OOHs05uvzV5Y/Neuzxxx9PS0szbag5hVqrFtOpfbfLJaWKgjmvG+6DTN9hTNwedm/m/Q8MncQ4i2RWVqBZVFQ0dtxYr8crK7L5evN5DCGEUZb92+xHJj8SExPToUOH/v37T5w48Yknnhg3blznzp29Pm/ZtTLdpwP3934458BBdKIcVY79+/e/9/57xcXFPXr0aNu2rYhmTWSjnGGEc/J3nziTr6mkflIfiuVBh+RUcWmRn6ykpESYoeBG0eWDqkU1DMPj8Qj6RSnVNG3YsGHLli07eOBgfl7+m2++mZCYgAI2gwquJjol1Y7q1atXDxo06I033mhWp4RzAOiQnBrK3kLxUEhO7NzYc8XFxSmK4g8d0U7qv/vuO3OeSUBmclsA6N69+9NPP/3O2+/U91GiUyJgdTgc2dnZH3/yMSHNGrFLTuwcqiGCg94BwhAXm9jYvLtTp04iU4w2+6MIoy1btsybN+/AgQMul0swf5EXiA+IgafBWYOJRBhlQRMBMSSBCX7qqafOFZwjhOi63jQziotJQDi4+eJg4RQwApsW668wR1rgYna7vV/ffmZSEWUlRbBu3bphw4YNGDBgztw5H330UXFxMUJIZFayLIs5svD9c+E9KysqZ82aZRiG+JbIdCNFFiEAsFnjMApORHEoVt/YXrEI4qNGj2q5kg+RCMKooKDgvQ3vzZgxo1fvXiNHjnzlT68cPHhQqO318uvMYAg30NTDBB86eOjBBx/ctGlTaWmp0HdzACBC4iGSjIh4KMbY5WbrX/tq8IDRjEU6MCUC/cmTJwfcPYAatOXaecLSOeeBvab09PSsrKwjOUfOnjmLcMNdT1HnF9WssePGTp0y9YEHHrBarWYqESq/EoB8n/v13N/9zKoFaQvhKN4n57xXr15ZWVktXEZjIsojjIhEJFkSavvhhx+ePXNWpEymew1zECIRIpHS0tKNH2ycMGFC//79n1vyXE5Ojll8iFxhGwaUc78J88ZGD4RmzZzVortTAx2riPKcczH5hGsHZhhlIjSF2dsgXKdYFUxwYWHhayteG5w1eOTIkevXry8vLzdz6EA+wGv1NNQtBj0Z4hwoa3QRTGjllClTkpOTgYMsy4HlOGFETXavKGy4MbfbIEDAIXNg5j2Z93DGDd0wkQ16arEqjDFMsCRLnPM9e/Y8/vjj/Qf0z87Ozs3NFQXGOqpK/YCiiABFAIyB0+VoLLEXZpKQkPDMM89QSnWfbuiGoRvUoNSgjDLOuBiXrfOtUCXRwJXg0LBbFqlhmzZtvvjXFzlHcvbu3bt48eKevXoKZAVBFgDVB1d4EoSQcAWXf7z8xhtvZGVlTZ48effu3QFqzgHA6XIwFnyFpaDXxTlUOcqb7EkXLVrUo0eP0tLSsmtlpSWlJaUlZWVlZWVl5eXl169fpwYV1+Kva1BGI2uxyIosErDA6lQg4xG4x8bFit7niBEjRowY8eqrrx4+fHjr1q3r1q3zeDystkpEJH/JKjA5Fgor8j2Msc/n27Zt27Zt22Y9NmvtmrUWi4UzDhgqHdc4D84ppRAZK5Rcu9S08gEAqKo6ZcqUOm/pui4qys//4fntn20HBCJMt+/Qvlu3bm0T27aJbxPfJj4mNsZus9vsNpvVpmma1Wa1Wq0SkRITE9/967tvv/V2UHdw0y1Jkp8GUAoAsiwPHz58+PDhGRkZ8+fPz8rKQhjl5uZ63J5AQlYncRJfF7Byzjd+sHHa1Gnjx483DB0ASsuLQ+WDUqjU82pZUeTEPmjPI1BxMMayLCclJSUlJc2fN//Tf36KEJowYcLs2bNHjhyZkJDQ4DGvXLny/nvvZ2dnjxgxorq62uvzGrpRWVm54rUVlRWVgVTJYrEIjylM258jYZw5MLN7j+779u1TFKWwsPDIkSP79u07eOjgqVOn3C630ErTy5uaSymVJAkBcjgcNy6mpCgUiZCCwiFJcPnqRfDvim6KntanTaZlDRw0cM6cObPnzB4+bPhN/RLOgnpJMfI3+mejx44bu3LlyjrvfvzJx8crjgdO3IkdDoEXI/xmRUVFxw4dFUXhnKelpaWlpU2bNg0AioqKtmzZ8sILL3i93kA/LWqPwqVQSi0WiyjFAcDlkgsSCV7JDQookyT4saTQ5a6xavZoDYT6S7+Mxdhj1q9fb2qBGf1xsAhpGIaiKL9//vcej2fzps0GNTjjgs0IEH0+Xx2HoygKBNtuo+u6UORAkSQpNTV10aJFX3/99blz59auXZuTk7Nj544j3x9xuVxCbQVwoiZJiORyV18uOS9LEHQgBwfVUFlC5RXXLpecB4Do5jyMMUVRBMsJFXADqaIkSXv37n3rrbc+3/W5oigYYVmWTUoAwbbVWBRL0KN5vV5FUcTpxKnFEXRdp5TaY+z33X/f6NGjn3vuuT279+Tn52/YsGH8+PEmLRGHRQh+vHr+WkWZJAXPx3AoRlnjZKcLjwIAj+rQndm8azCVEipWXV09a9asv/31bz169BBrUJ+cByUD9ZMcr8crS3L9pou4GJfTJUkSpdTj8XDOu3XrNnv27B07dkx8eKIInsLkAeB04VGnk4e6fhy6hQN5pw7ATycioZ43b96E/5gwY8YMwwiyZa9OGuMvRauqSD0DhwEMw/D5fJIcsh/u9Xo1VRNqK1yTQHbQwEFmrBN/5J0+GMZmg5+AM2ZR4PgP+2p3HvImPOYikN8F2nUkHll0fjZv3lx4vvC7jd+FagSZBeYbFS8Ex48fz83L7de3n6nOwrS9Xr+GBhXd0FVNDVRbgazYJYUwkmVZfCz3h30WJaThhuKhzKKgC5fOFv14pltKH8ZYhCP7gbQpjH8M1/hEwBknhJSWli5YsGDVqlWEEJHDhAOU3yibXrl8ZejQoWlpaW3btu3QoUPHDh07duyYmJi4atWqEfeNCMWddV1XVbX+u26PWyyJWJWLl05duHTWoqBQj9ORwiTmFVXGgZxd3VL6cM4ir0sJbSKEuN3u06dP22w2TdNUVVVqRQAdTk8JAMCChQscDseVK1dcbpdFsQTtbZgmfyNyckAYuZyu/Lz8+gee+PDE+j7UBFTQgzqvC/4vy7IsSxz4waOfVztZfJwkHi/XCEA55xKB3Qf/8Z+/XBxhBd6E0uv1btq0aeXKlSdPnpQVWVEUi8Wi1oqmappVs9vtNqvNZrPZ7Da7zW632+0xdqvVqlrUhPiEIzlHtm7ZKivyiy++6HA4li9f7vV6zW2dwsfJsqzrurPGWccbibEnU0z90H266Qfri8/ni4mJERm9eQqEkJjPIISoqoYA7T64LRQDbQBQxqhVQ3mn/u+FSye7dukdfj+lCKkiN9+8efNrr70mpjUBge7TdZ/urHE2mrfWEkCny2laXKABGYbx9NNPO51OTOoWeoP2rhljVtUa0uR9+ulTpzHGpuELr+31eQXJj4uN/7GkIP90jlVDYeY7pfDluOuVxq5vNy2Y9WooqzfdJQDs2Llj+fLlBw8cFFfgHxbDQcJR/T/qY+E3ZwT/+vxfS5YsURRF0zRN0yyqRVM1RVE+2PjBl198WR/NMKJa1aDkDAAsqmXNmjVlZWUZGRldUrqkpqR26dKlpqYm50gOAGCEYuxxW7aurKo2EuND2nsDgDLGNBU+371pzrQXLIq1vhczbfzY8WPLli379J+fmlCabKbOoFITGsgFBQUrVqwITvpI4/amBA07/tqdbnDOP/nkk7oH5wAAmmqtqi7b+e3fNbWBZ2bisPfDNAs5d+HSN99tFYP79dF0OBxLliwZeu/QT//5qWjSNq1zEN72JVky/4l6pfgX+YnE2qiWkIAK05YVWZwCE3/TSWT08fFJuw/9o+DCRU3F4R+Z20C04QCShP7PZ39hjCGMzZ6IMPNvvv1myJAhK1as8Hg84vZaYi+TKBfVmW8OmiM1KBbVEtTPmPTLHEsRzgohJODTDfeWXe8Qghq0MdxQukLtVnwk7+iew//ECFPGzBxmw4YNY8aMOXXqlGiTtdwTOaO1KoHZTv0STP25Zx7wUPcfSwoLi/ItCm/wic4N8yEOQAha/9EfxTPYRH3I4/G8/F8vM8okWRJtMrgTJJTJ67pu6EYYL8+4EbXdyIxRmxXn5OXu/OYDjLEIcE6nU2Qvt7li1vWhIYJSUA0N7AYQEmkLOMLdyFy1oDV/X1rjrBIVVo/H43a77xTFvOFDQ5u8buhhA2OkvQsc2fIyVcXni35ct/lFscnb6/V6vd47CMpADa330xggZs3CwSQegsqjBKgIf3GxZNM/Vuee3I8A1TirA0vlt7n4EUShNVQ3GgQUoYhsHjfmsjhjbOnrszkYdmsMoyzUhpfbUkVBkiRRggsCKDXCbxKNfJywERuQGGNWjZw5X7D8jYVd2z4AAQ8HuSNEkqQ69aTAKN9A/hPxc48bt6PLMGhiAnr99Xcri99FGO6soCRGg0KV61moURATUGgBQAGAcW6RMUL89vkJo8hDvKqqgjWb+iiSFF33b3gIpSIItxigYs8/53D7Pa86fAQAt9vtcrmSkpLqv1lTUwO1+3eCw6RE2gJqypP4GLuzVNNfo3PWOKdNm/bwww9bLBaLalFkRVZki8XCKFu1alWYRBEArLGRjs01BdBb8ANFQbcpNpeHIjh8+PDhw4dDqXCQxxxg4BQsNoiJB0ojMsrmaejNQ5u1PwPg563B5wBqR63rvFunbHpjbw6KCPqQvu/m5lXgZHPg9FWgVzU/zhlwCghBSm8gClC9xQD1txgZ1MlvOXAWWMoOdnpGWST+rk18G4/Ho+u6OfsY2lx4GNw544GTL3XPjsLZn6RAbCK0S4PYxEjRbDSgCAGjkNoPOqSJsXHgDBgD4Njr5eMfmJ5194NXS37knL//wQeFBQWBbl5sJ+7Zq2dyUrLT6fTpPvNpyrqui78ZYx635+WXX/71r399/fp1wzAuXLgwfcZ0j9sTfCsCB4tqkSTJ6Qzes2qb1DYmJsbUTSHiUY5nzpypT+YRhthEsMaBvQ3Y2oDFBsCBGY2IwFITHKhFA9VWL4ni6ELFN9N6T5w79wUAuH79+qqVq+rETUmStn+2XWxirZ81CGQNw4iLiwOA9u3bA0D//v07dexUWFhYJ4kghFCDPvbrx9asXgMcsn+bvW7dOlFLDIR7x44dvXv1FuVwIeK7V69e6dW7t+7Tb1onDkSC9IFg0YAxYAyofpMTaC6gdRRC/DicYGR+2oTMX4vjGPHyipJ5v58+9RefLZj56gMjR7315ptmcU+oZ1xC3JYtW3Rdd7vdHo/H4/V4PV7d0A39xnNGOHC3200pFbs2ZUWuclTVZ4jifyml27dvt1qtqXelBu7gFHBPnzE9a3BW0Fvr2LFT544pJ6tO3Fgn5AcUEOheEPPJTaCGaPCEesChWrDQDdQ4AGfAKDAKVAfDAOoD3QdG7X8NH1AdMQM5KllCfJwia6WlpXXjZpMjNgpLavzWim6aDec8MzMzPS09MTGxffv27dq3a9+ufXJycnJyUnx8wvnio08smHP8QDHGwJjYaA+cQede0DkDdN8NKBuLKcp66AZwtbwdqAGGD3Qv6F7weUH3gM8DusePHTWAGSHJE0LEv4s82KUEnc8Jz43CbGw2OUPwzwT7kmJRYmNjq13XOAbdGaCeDNq0g+6DABHAuHabOAPOgbObhjpRWO6B7h4DPg/43OBzg9fl/1v3gqFDuI01KOTq8VpP8JNn+lj88l3tDno/N+IB94BuukLZAkQCWQWLBhYrWGxg0UDR/K+LI4lfv/UDzYNAjIjsd73BUbuZad5OP0LczJQh2A8qB7s1LIGigqKBagPVBqodLBrIKkgKYFILsZ/qmEOK9bwvv8NRa07Kj+rgwIMUSoQWq3bQ7KDFgMUKigpEFlqMoFUiR9mv17xucU+osBbTmEpfq9zkCdHNwbwhPtIqTfDOrRi0Squ0Squ0Squ0Squ0Squ0Squ0SqvcefL/ACJ9g75kQ++eAAAAAElFTkSuQmCC") no-repeat center 22px/54px;background-blend-mode:luminosity;padding-top:92px}
+.vacio p{opacity:.95}
+.vacio p{margin:0 0 12px}
+
+/* ---------- pie fijo ---------- */
+.pie{position:fixed;left:0;right:0;bottom:0;background:rgba(38,56,11,.97);padding:9px 14px calc(9px + env(safe-area-inset-bottom));z-index:45}
+.pie-in{max-width:820px;margin:0 auto;display:flex;gap:8px;align-items:center}
+.pie .est{color:var(--salvia-cl);font-size:12.5px;flex:1;min-width:0}
+.pie .est b{color:#fff;display:block;font-family:"Barlow Condensed";font-size:16px}
+
+/* ---------- modal ---------- */
+.modal{position:fixed;inset:0;background:rgba(26,30,18,.62);display:flex;align-items:flex-end;justify-content:center;z-index:60}
+.modal .box{background:#fff;width:100%;max-width:820px;max-height:88vh;overflow:auto;border-radius:10px 10px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom))}
+.modal h3{margin:0 0 10px;font-size:21px}
+.sig{width:100%;height:180px;border:1px dashed #B6C09E;border-radius:4px;background:#FBFCF8;touch-action:none;display:block}
+.ruta{border:1px solid var(--linea);border-radius:4px;background:#FBFCF8;padding:10px;margin-bottom:10px}
+.ruta>span{display:block;font-size:12.5px;color:var(--gris);margin-bottom:5px}
+.ruta code{display:block;font-family:ui-monospace,monospace;font-size:12.5px;word-break:break-all;margin-bottom:8px;color:var(--tinta)}
+ul.arch{list-style:none;margin:5px 0 0;padding:0}
+ul.arch li{padding:4px 0;border-bottom:1px solid #EDF0E5;font-size:13px}
+ul.arch li:last-child{border-bottom:0}
+ul.arch code{font-family:ui-monospace,monospace;font-size:12px;word-break:break-all}
+ul.arch small{color:var(--gris);display:block}
+ul.arch li.vacia{color:var(--gris);font-style:italic}
+.sub{padding:9px 14px 4px;border-top:1px solid var(--linea);background:#F7F9F1;font-family:"Barlow Condensed";font-weight:600;font-size:15px;color:var(--gris)}
+.desplegable{border:1px solid var(--linea);border-radius:4px;background:#FBFCF8;margin-bottom:10px}
+.desplegable>summary{list-style:none;cursor:pointer;padding:12px 10px;min-height:46px;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--gris)}
+.desplegable>summary::-webkit-details-marker{display:none}
+.desplegable>summary b{margin-left:auto;text-align:right;font-family:"Barlow";font-weight:500;font-size:14px;color:var(--tinta)}
+.desplegable>summary:after{content:"▾";color:var(--gris);flex:0 0 auto}
+.desplegable[open]>summary{border-bottom:1px solid var(--linea)}
+.desplegable[open]>summary:after{content:"▴"}
+.desplegable .items{background:#fff;border-radius:0 0 4px 4px}
+.aviso{background:#F6EBD3;border:1px solid #E0C692;border-radius:4px;padding:10px 12px;font-size:13.5px;color:#6B4A08;margin:12px 0}
+.aviso b{font-family:"Barlow Condensed";font-size:15px}
+pre.res{white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:12.5px;background:#F2F5EA;border:1px solid var(--linea);border-radius:4px;padding:11px;max-height:44vh;overflow:auto}
+@media(prefers-reduced-motion:no-preference){.tira{transition:opacity .15s}}
+</style>
+
+<div class="top"><div class="top-in">
+  <img class="logo" src="data:image/png;base64,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" alt="Camper Spot">
+  <div class="marca">Camper Spot<span>Checklist de flota</span></div>
+  <div class="suc-sw" id="sucSw"></div>
+</div></div>
+<div class="rail" id="rail" hidden><div class="rail-in" id="railIn"></div></div>
+
+<div class="wrap" id="app"></div>
+<div class="pie" id="pie" hidden><div class="pie-in" id="pieIn"></div></div>
+<div id="modales"></div>
+
+<script>
+/* ══════════ CONFIGURACIÓN ══════════ */
+const SUCURSALES = ["Santiago","Puerto Montt"];
+
+const FLOTA_BASE = [
+  {patente:"SFCX19", suc:"Santiago", mant:"189.603 millas", rt:"2025-12-16", permiso:"2026-03-31"},
+  {patente:"SFCX20", suc:"Santiago", mant:"186.880 millas", rt:"2025-12-25", permiso:"2026-03-31"},
+  {patente:"SPBD28", suc:"Santiago", mant:"164.435 millas", rt:"2026-12-17", permiso:"2026-03-31"},
+  {patente:"SPBD29", suc:"Santiago", mant:"156.261 millas", rt:"2025-12-16", permiso:"2026-03-31"},
+  {patente:"SDWY74", suc:"Santiago", mant:"", rt:"", permiso:""},
+];
+const ORDEN = FLOTA_BASE.map(v=>v.patente);
+const ordenaFlota = l => l.slice().sort((a,b)=>{
+  const i=ORDEN.indexOf(a.patente), j=ORDEN.indexOf(b.patente);
+  if(i<0&&j<0) return a.patente.localeCompare(b.patente);
+  if(i<0) return 1; if(j<0) return -1; return i-j;
+});
+
+const ADICIONALES = ["Utensilios de cocina","Ropa de cama","Sillas y mesas","Parrilla","Portabicicletas","Ninguno"];
+
+const PREP = ["Desagüe de aguas grises y negras","Manguera de desagüe","Agua potable","Cargar agua sapito",
+"Manguera de agua con dos adaptadores","Gas","Gata, llave, triángulo y kit primeros auxilios",
+"Escoba, basurero y legos","Rueda de repuesto","Presión adecuada neumáticos","Water Heater","Generador",
+"Microondas","Aire acondicionado","Quemadores","Extractor de aire","Refrigerador","Calefacción","Bencina",
+"Aire acondicionado cabina","Limpieza por dentro y por fuera","Bolsitas para aguas negras",
+"Guantes para desaguar","Adaptadores de enchufe","Chaleco reflectante","Documentos al día"];
+
+const REV_GRUPOS = [
+  {id:"ext", t:"Daños exteriores", items:["Daños laterales","Daños techo","Daños bajo"]},
+  {id:"falta", t:"Que no falte", items:["Gata, llave y rueda de repuesto","Manguera de agua con dos adaptadores",
+    "Escoba y basurero","Manguera de desagüe","Chaleco reflectante y documentos del vehículo"]},
+  {id:"sis", t:"Sistemas motorhome", items:["Desagüe de aguas grises y negras (por fuera)",
+    "Enchufe a corriente 220 (por fuera)","Aceite de generador","Puerta y pestillos",
+    "Ventanas, mosquiteros y cortinas","Escotillas","Luces interior","Techo","Suelo","Murallas","Cajones",
+    "Camas","Cama comedor","Mesa y mesón","Llaves de agua","Ducha","WC","Cocina a gas y extractor de aire",
+    "Water Heater y bomba de agua","Nivel de desagüe y estado de batería","Generador","Aire acondicionado",
+    "Microondas","Refrigerador","Calefacción","Aire acondicionado cabina"]},
+  {id:"mec", t:"Chequeo mecánico y vehicular", items:["Luces exteriores (delanteras, traseras, intermitentes, freno)",
+    "Líquido refrigerante","Dirección hidráulica","Aceite motor","Aceite de caja","Sulfato batería",
+    "Prueba de conducción breve"]},
+];
+
+const SLOTS = [
+  {k:"v_ext",  et:"entrega",  tipo:"video", t:"Video exterior y bajo", d:"Recorrido completo mostrando los cuatro costados y los bajos.", req:1},
+  {k:"v_int",  et:"entrega",  tipo:"video", t:"Video interior",        d:"Recorrido por cocina, baño, camas y comedor.", req:1},
+  {k:"v_tec",  et:"entrega",  tipo:"video", t:"Video techo",           d:"Estado del techo, escotillas y sellos.", req:1},
+  {k:"f_tab_s",et:"entrega",  tipo:"foto",  t:"Foto al tablero (salida)", d:"Debe verse el millaje y el indicador de bencina.", req:1},
+  {k:"f_tab_l",et:"revision", tipo:"foto",  t:"Foto al tablero (llegada)", d:"Nivel de bencina y millaje de regreso.", req:1},
+];
+
+const ETAPAS = [
+  {k:"datos",    t:"Arriendo"},
+  {k:"prep",     t:"Preparación"},
+  {k:"entrega",  t:"Entrega"},
+  {k:"revision", t:"Revisión"},
+  {k:"reporte",  t:"Reporte"},
+];
+
+/* ══════════ ALMACENAMIENTO ══════════ */
+const MEM = {}; let SIN_DISCO = false;
+const St = {
+  async get(k){ if(SIN_DISCO) return MEM[k]??null;
+    try{const r=await window.storage.get(k); return r?r.value:null}catch(e){return MEM[k]??null} },
+  async set(k,v){ MEM[k]=v;
+    try{ await window.storage.set(k,v) }catch(e){ SIN_DISCO=true } },
+  async del(k){ delete MEM[k]; try{ await window.storage.delete(k) }catch(e){} },
+  async list(p){ if(SIN_DISCO) return Object.keys(MEM).filter(k=>k.startsWith(p));
+    try{const r=await window.storage.list(p); return r?r.keys:[]}catch(e){return Object.keys(MEM).filter(k=>k.startsWith(p))} },
+};
+if(!window.storage) SIN_DISCO = true;
+
+/* ══════════ ESTADO ══════════ */
+let S = { vista:"inicio", suc:SUCURSALES[0], etapa:"datos", indice:[], r:null, flota:[] };
+const FOTOS = {};                 // idFoto -> dataURL (cache en memoria)
+const VIDEOS = {};                // idVideo -> objectURL (solo sesión activa)
+const uid = ()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+const hoy = ()=>new Date().toISOString().slice(0,10);
+const esc = s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fecha = s=>s?s.split("-").reverse().join("/"):"—";
+
+function nuevaFicha(){
+  return { id:uid(), suc:S.suc, patente:"", cliente:"", fi:hoy(), ft:"", adicionales:[], obs:"",
+    prep:{}, prepNota:"", entrega:{km:"", firma:""}, rev:{}, revNota:{},
+    danos:[], reporte:{km:"", bencina:"", gas:"0", nota:""},
+    media:{}, estado:"borrador", creado:Date.now(), act:Date.now() };
+}
+
+/* ══════════ PROGRESO ══════════ */
+const adicSel = r => (r.adicionales||[]).filter(a=>a!=="Ninguno");
+const itemsPrep = r => PREP.map((t,i)=>({k:"p"+i,t})).concat(adicSel(r).map(a=>({k:"a:"+a,t:a,adic:1})));
+const itemsRev = (g,r) => g.items.map((t,i)=>({k:g.id+i,t}))
+  .concat(g.id==="falta" ? adicSel(r).map(a=>({k:"falta_a:"+a,t:a,adic:1})) : []);
+
+function prog(r,et){
+  if(!r) return [0,1];
+  if(et==="datos"){ const c=[r.patente,r.cliente,r.fi,r.ft]; return [c.filter(Boolean).length,c.length]; }
+  if(et==="prep"){ const it=itemsPrep(r); return [it.filter(x=>r.prep[x.k]).length, it.length]; }
+  if(et==="entrega"){
+    const sl=SLOTS.filter(s=>s.et==="entrega");
+    let n=sl.filter(s=>(r.media[s.k]||[]).length).length, t=sl.length+1;
+    if(r.entrega.km) n++;
+    return [n,t];
+  }
+  if(et==="revision"){
+    let n=(r.media.f_tab_l||[]).length?1:0, tot=1;
+    REV_GRUPOS.forEach(g=>itemsRev(g,r).forEach(x=>{ tot++; if(r.rev[x.k]) n++; }));
+    return [n,tot];
+  }
+  const c=[r.reporte.km,r.reporte.bencina,r.reporte.gas]; return [c.filter(Boolean).length,c.length];
+}
+const progTotal = r => ETAPAS.reduce((a,e)=>{const[n,t]=prog(r,e.k);return[a[0]+n,a[1]+t]},[0,0]);
+
+/* ══════════ CARGA ══════════ */
+async function bootstrap(){
+  await cargaCfg();
+  const f = await St.get("flota");
+  S.flota = f ? JSON.parse(f) : FLOTA_BASE.slice();
+  FLOTA_BASE.forEach(v=>{ if(!S.flota.some(x=>x.patente===v.patente)) S.flota.push(v); });
+  if(await St.get("flotaV") !== "3"){
+    S.flota.forEach(v=>{ if(ORDEN.includes(v.patente)) v.suc="Santiago"; });
+    await St.set("flotaV","3");
+  }
+  S.flota = ordenaFlota(S.flota);
+  await St.set("flota", JSON.stringify(S.flota));
+  const ix = await St.get("indice");
+  S.indice = ix ? JSON.parse(ix) : [];
+  pinta();
+}
+async function guardaIndice(){ await St.set("indice", JSON.stringify(S.indice)); }
+
+async function guardaFicha(forzar){
+  const r=S.r; if(!r) return;
+  const yaExiste = S.indice.some(x=>x.id===r.id);
+  if(!yaExiste && !forzar && !r.patente && !r.cliente) return;   // ficha en blanco: no se archiva
+  r.act=Date.now();
+  const [n,t]=progTotal(r);
+  const res={id:r.id,suc:r.suc,patente:r.patente,cliente:r.cliente,fi:r.fi,ft:r.ft,
+             estado:r.estado,act:r.act,pct:Math.round(n/t*100),
+             mes:mesDe(r), carpeta:nombreCarpeta(r)};
+  const i=S.indice.findIndex(x=>x.id===r.id);
+  if(i<0) S.indice.unshift(res); else S.indice[i]=res;
+  await St.set("r:"+r.id, JSON.stringify(r));
+  await guardaIndice();
+  S.guardado=Date.now(); pintaPie();
+}
+async function abreFicha(id){
+  const raw = await St.get("r:"+id); if(!raw) return flash("No se encontró la ficha");
+  S.r = JSON.parse(raw); S.vista="ficha"; S.etapa="datos";
+  if(!Array.isArray(S.r.adicionales)) S.r.adicionales = S.r.adicionales ? [S.r.adicionales] : [];
+  delete S.r.operador;
+  Object.keys(S.r.rev||{}).forEach(k=>{ if(S.r.rev[k]==="obs") S.r.rev[k]="dano"; });
+  for(const k of Object.keys(S.r.media||{})){
+    for(const m of S.r.media[k]){
+      if(m.tipo==="foto" && !FOTOS[m.id]){ const d=await St.get("f:"+m.id); if(d) FOTOS[m.id]=d; }
+    }
+  }
+  for(const d of S.r.danos||[]) for(const m of d.fotos||[])
+    if(!FOTOS[m.id]){ const x=await St.get("f:"+m.id); if(x) FOTOS[m.id]=x; }
+  pinta();
+}
+async function borraFicha(id){
+  const raw=await St.get("r:"+id);
+  if(raw){ const r=JSON.parse(raw);
+    for(const k of Object.keys(r.media||{})) for(const m of r.media[k]) if(m.tipo==="foto") await St.del("f:"+m.id);
+    for(const d of r.danos||[]) for(const m of d.fotos||[]) await St.del("f:"+m.id);
+  }
+  await St.del("r:"+id);
+  S.indice=S.indice.filter(x=>x.id!==id); await guardaIndice();
+  S.vista="inicio"; S.r=null; pinta(); flash("Ficha eliminada");
+}
+
+/* ══════════ IMÁGENES ══════════ */
+function comprime(file,max=1800,q=.72){
+  return new Promise((ok,err)=>{
+    const fr=new FileReader();
+    fr.onload=()=>{ const im=new Image();
+      im.onload=()=>{ let{width:w,height:h}=im; const e=Math.min(1,max/Math.max(w,h));
+        w=Math.round(w*e); h=Math.round(h*e);
+        const c=document.createElement("canvas"); c.width=w; c.height=h;
+        c.getContext("2d").drawImage(im,0,0,w,h);
+        ok(c.toDataURL("image/jpeg",q)); };
+      im.onerror=err; im.src=fr.result; };
+    fr.onerror=err; fr.readAsDataURL(file);
+  });
+}
+
+async function subir(slotKey, files, danoId){
+  const r=S.r; const arr=[...files]; if(!arr.length) return;
+  let hechos=0;
+  flash(`Procesando 1 de ${arr.length}…`, true);
+  for(const file of arr){
+    flash(`Procesando ${++hechos} de ${arr.length}…`, true);
+    const id=uid();
+    if(file.type.startsWith("video")){
+      VIDEOS[id]=URL.createObjectURL(file);
+      ARCHIVOS[id]=file;
+      const m={id,tipo:"video",nombre:file.name,peso:file.size};
+      push(slotKey,m,danoId); encolar(r,slotKey,danoId,m);
+    }else{
+      let data; try{ data=await comprime(file); }catch(e){ flash("No se pudo leer la imagen"); continue; }
+      FOTOS[id]=data;
+      await St.set("f:"+id, data);
+      const m={id,tipo:"foto",nombre:file.name,peso:data.length};
+      push(slotKey,m,danoId); encolar(r,slotKey,danoId,m);
+    }
+  }
+  await guardaFicha(); pinta();
+}
+function push(slot,item,danoId){
+  const r=S.r;
+  if(danoId){ const d=r.danos.find(x=>x.id===danoId); (d.fotos=d.fotos||[]).push(item); }
+  else { (r.media[slot]=r.media[slot]||[]).push(item); }
+}
+async function quitaArchivo(id){
+  const i=COLA.findIndex(t=>t.id===id); if(i>=0) COLA.splice(i,1);
+  delete ARCHIVOS[id];
+  await St.del("f:"+id); delete FOTOS[id];
+  if(VIDEOS[id]){ URL.revokeObjectURL(VIDEOS[id]); delete VIDEOS[id]; }
+}
+async function quitaMedia(slot,id,danoId){
+  const r=S.r;
+  if(danoId){ const d=r.danos.find(x=>x.id===danoId); d.fotos=d.fotos.filter(m=>m.id!==id); }
+  else r.media[slot]=(r.media[slot]||[]).filter(m=>m.id!==id);
+  await St.del("f:"+id); delete FOTOS[id];
+  if(VIDEOS[id]){ URL.revokeObjectURL(VIDEOS[id]); delete VIDEOS[id]; }
+  await guardaFicha(); pinta(true);
+}
+
+
+/* ══════════ CONEXIÓN CON GOOGLE DRIVE ══════════ */
+let CFG = { url:"https://drive-camperspot.miguelduchs.workers.dev", clave:"" };
+const hayDrive = ()=> !!(CFG.url && CFG.clave);
+const ARCHIVOS = {};          // id -> File o Blob pendiente de subir (solo esta sesión)
+const COLA = [];              // trabajos de subida
+let SUBIENDO = false;
+
+async function cargaCfg(){
+  const raw = await St.get("cfg");
+  if(raw){ try{ CFG = {...CFG, ...JSON.parse(raw)}; }catch(e){} }
+}
+async function guardaCfg(){ await St.set("cfg", JSON.stringify(CFG)); }
+
+async function api(ruta, cuerpo){
+  const r = await fetch(CFG.url.replace(/\/$/,"") + ruta, {
+    method: cuerpo ? "POST" : "GET",
+    headers: { "Content-Type":"application/json", "x-clave": CFG.clave },
+    body: cuerpo ? JSON.stringify(cuerpo) : undefined,
+  });
+  const d = await r.json().catch(()=>({error:"Respuesta ilegible"}));
+  if(!r.ok) throw new Error(d.error || ("HTTP "+r.status));
+  return d;
+}
+
+/* Dónde va cada archivo dentro de la carpeta del arriendo */
+function destino(r, slot, danoId, indice){
+  if(danoId){
+    const d=(r.danos||[]).find(x=>x.id===danoId);
+    return { sub:"Daños", base: slug(d && d.zona || "sin-zona") };
+  }
+  if(String(slot).startsWith("rev:")){
+    const k=slot.slice(4);
+    let t=k;
+    REV_GRUPOS.forEach(g=>itemsRev(g,r).forEach(x=>{ if(x.k===k) t=x.t; }));
+    return { sub:"Daños", base: slug(t) };
+  }
+  if(slot==="v_ext"||slot==="v_int"||slot==="v_tec") return { sub:"Videos", base:NOMBRES[slot] };
+  if(NOMBRES[slot]) return { sub:"Ficha", base:NOMBRES[slot] };
+  return { sub:"Ficha", base: slug(slot||"archivo") };
+}
+
+function encolar(r, slot, danoId, media){
+  if(!hayDrive()){ media.estado="local"; return; }
+  COLA.push({ id:media.id, fichaId:r.id, slot, danoId, media });
+  media.estado = "pendiente";
+  procesaCola();
+}
+
+async function procesaCola(){
+  if(SUBIENDO || !COLA.length || !hayDrive()) return;
+  SUBIENDO = true;
+  while(COLA.length){
+    const t = COLA[0];
+    try{
+      await subeArchivo(t);
+      t.media.estado = "listo";
+    }catch(e){
+      t.media.estado = "error";
+      t.media.detalle = String(e.message||e);
+      flash("Falló la subida: "+t.media.detalle);
+    }
+    COLA.shift();
+    if(S.r && S.r.id===t.fichaId){ pintaSubidas(); guardaFicha(); }
+  }
+  SUBIENDO = false;
+}
+
+async function subeArchivo(t){
+  const r = S.r && S.r.id===t.fichaId ? S.r : JSON.parse(await St.get("r:"+t.fichaId));
+  const blob = ARCHIVOS[t.id] || (FOTOS[t.id] ? await (await fetch(FOTOS[t.id])).blob() : null);
+  if(!blob) throw new Error("El archivo ya no está en memoria");
+
+  const d = destino(r, t.slot, t.danoId);
+  const lista = t.danoId ? ((r.danos.find(x=>x.id===t.danoId)||{}).fotos||[]) : (r.media[t.slot]||[]);
+  const i = Math.max(0, lista.findIndex(m=>m.id===t.id));
+  const ext = EXT(t.media.nombre) || (t.media.tipo==="video" ? "mp4" : "jpg");
+  const nombre = `${d.base}${i?"-"+(i+1):""}.${ext}`;
+
+  const { carpetaId } = await api("/carpeta", { ruta:[RAIZ, nombreCarpeta(r), d.sub] });
+  const { subidaUrl } = await api("/sesion", {
+    carpetaId, nombre, mime: blob.type || "application/octet-stream", tamano: blob.size,
+  });
+
+  const TROZO = 8 * 1024 * 1024;
+  let desde = 0, respuesta = null;
+  while(desde < blob.size){
+    const hasta = Math.min(desde + TROZO, blob.size);
+    const res = await fetch(subidaUrl, {
+      method:"PUT",
+      headers:{ "Content-Range": `bytes ${desde}-${hasta-1}/${blob.size}` },
+      body: blob.slice(desde, hasta),
+    });
+    if(res.status === 308){
+      const rango = res.headers.get("Range");
+      desde = rango ? Number(rango.split("-")[1]) + 1 : hasta;
+    } else if(res.ok){
+      respuesta = await res.json().catch(()=>({}));
+      desde = blob.size;
+    } else {
+      throw new Error("Drive respondió "+res.status);
+    }
+    t.media.pct = Math.round(desde / blob.size * 100);
+    if(S.r && S.r.id===t.fichaId) pintaSubidas();
+  }
+  t.media.driveId = respuesta && respuesta.id || "";
+  t.media.pct = 100;
+  delete ARCHIVOS[t.id];
+}
+
+/* Sube ficha.json y resumen.txt */
+async function subeDocumentos(r){
+  if(!hayDrive()) return;
+  const { carpetaId } = await api("/carpeta", { ruta:[RAIZ, nombreCarpeta(r), "Ficha"] });
+  await api("/texto", { carpetaId, nombre:"resumen.txt", contenido:textoResumen(r), mime:"text/plain" });
+  await api("/texto", { carpetaId, nombre:"ficha.json",
+    contenido:JSON.stringify(fichaExport(r),null,2), mime:"application/json" });
+}
+
+const pendientes = ()=> COLA.length;
+function pintaSubidas(){
+  document.querySelectorAll("[data-ver]").forEach(b=>{
+    const m = buscaMedia(b.dataset.ver); if(!m) return;
+    b.dataset.estado = m.estado || (m.driveId ? "listo" : "");
+    const barra = b.querySelector(".pb");
+    if(barra) barra.style.width = (m.pct||0) + "%";
+  });
+  pintaPie();
+}
+function buscaMedia(id){
+  const r=S.r; if(!r) return null;
+  for(const k of Object.keys(r.media||{})){ const m=(r.media[k]||[]).find(x=>x.id===id); if(m) return m; }
+  for(const d of r.danos||[]){ const m=(d.fotos||[]).find(x=>x.id===id); if(m) return m; }
+  return null;
+}
+
+/* ══════════ AJUSTES ══════════ */
+function vistaAjustes(){
+  app.innerHTML=`<div class="row" style="margin:14px 0"><button class="btn ghost" data-act="inicio">Volver</button></div>
+  <h2 class="tit" style="font-size:22px;margin:0 0 10px">Conexión con Google Drive</h2>
+  <div class="card"><div class="pad">
+    <label class="f"><span>URL del Worker</span>
+      <input type="text" id="cfgUrl" value="${esc(CFG.url)}" placeholder="https://...workers.dev"></label>
+    <label class="f"><span>Clave de acceso</span>
+      <input type="password" id="cfgClave" value="${esc(CFG.clave)}" placeholder="La que pusiste en CLAVE_APP"></label>
+    <div class="row"><button class="btn acento" id="cfgOk">Guardar</button>
+      <button class="btn ghost" id="cfgTest">Probar conexión</button></div>
+    <p class="hint" id="cfgEstado">${hayDrive()?"Configurado. Las fotos, videos y documentos se suben solos.":"Sin configurar: todo queda solo en este teléfono."}</p>
+  </div></div>
+  <div class="card"><h3>Cómo funciona</h3><div class="pad">
+    <p class="hint" style="margin:0 0 8px">Cada arriendo genera una carpeta en el Drive de la cuenta conectada, con tres subcarpetas: Videos, Ficha y Daños.</p>
+    <p class="hint" style="margin:0">Los archivos se suben en segundo plano mientras sigues llenando el checklist. Si se corta la señal, la subida retoma donde iba.</p>
+  </div></div>`;
+  document.getElementById("cfgOk").onclick=async()=>{
+    CFG.url=document.getElementById("cfgUrl").value.trim();
+    CFG.clave=document.getElementById("cfgClave").value.trim();
+    await guardaCfg(); flash("Conexión guardada"); pinta();
+  };
+  document.getElementById("cfgTest").onclick=async()=>{
+    const e=document.getElementById("cfgEstado");
+    const url=document.getElementById("cfgUrl").value.trim();
+    const clave=document.getElementById("cfgClave").value.trim();
+    e.textContent="Probando…";
+    try{
+      const r=await fetch(url.replace(/\/$/,"")+"/carpeta",{method:"POST",
+        headers:{"Content-Type":"application/json","x-clave":clave},
+        body:JSON.stringify({ruta:[RAIZ]})});
+      const d=await r.json();
+      e.textContent = r.ok ? "Conexión correcta. Carpeta lista en Drive." : ("Error: "+(d.error||r.status));
+    }catch(err){ e.textContent="No se pudo conectar: "+err.message; }
+  };
+}
+
+/* ══════════ PINTADO ══════════ */
+const app=document.getElementById("app");
+function pinta(keep){
+  const y = keep ? window.scrollY : 0;
+  document.getElementById("sucSw").innerHTML = (S.vista==="ficha"&&S.r)
+    ? `<span class="suc-fija">${esc(S.r.suc)}</span>`
+    : SUCURSALES.map(x=>`<button data-suc="${x}" aria-pressed="${S.suc===x}">${x}</button>`).join("");
+  const rail=document.getElementById("rail"), pie=document.getElementById("pie");
+  if(S.vista==="ficha"&&S.r){ rail.hidden=false; pie.hidden=false; pintaRail(); pintaPie(); }
+  else { rail.hidden=true; pie.hidden=true; }
+  if(S.vista==="inicio") vistaInicio();
+  else if(S.vista==="flota") vistaFlota();
+  else if(S.vista==="archivo") vistaArchivo();
+  else if(S.vista==="ajustes") vistaAjustes();
+  else vistaFicha();
+  if(keep) window.scrollTo(0,y); else window.scrollTo({top:0});
+}
+function pintaRail(){
+  document.getElementById("railIn").innerHTML = ETAPAS.map(e=>{
+    const[n,t]=prog(S.r,e.k), seg=6, on=Math.round(n/t*seg);
+    return `<button class="gauge" data-etapa="${e.k}" aria-current="${S.etapa===e.k}" data-full="${n>=t}">
+      <b>${e.t}</b><span class="bars">${Array.from({length:seg},(_,i)=>`<s class="${i<on?"on":""}"></s>`).join("")}</span>
+      <i>${n}/${t}</i></button>`;
+  }).join("");
+}
+function pintaPie(){
+  const[n,t]=progTotal(S.r), p=Math.round(n/t*100);
+  const g=!S.indice.some(x=>x.id===S.r.id) ? "Sin guardar todavía"
+    : S.guardado ? "Guardado "+new Date(S.guardado).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"}) : "Guardada";
+  document.getElementById("pieIn").innerHTML=`
+    <div class="est"><b>${p}% completo</b>${pendientes()?`Subiendo ${pendientes()} archivo(s)…`:(S.r.patente||"Sin patente")+" · "+g}</div>
+    <button class="btn acento sm" data-act="guardar">Guardar</button>`;
+}
+
+/* ---------- inicio ---------- */
+function vistaArchivo(){
+  const fs=S.indice.slice().sort((a,b)=>(b.carpeta||"").localeCompare(a.carpeta||""));
+  app.innerHTML=`<div class="row" style="margin:14px 0"><button class="btn ghost" data-act="inicio">Volver</button></div>
+  <h2 class="tit" style="font-size:22px;margin:0 0 4px">Carpetas de arriendo</h2>
+  <p class="hint" style="margin:0 0 14px">Ordenadas por fecha, la más reciente primero. Cada una contiene Videos, Ficha y Daños.</p>
+  ${fs.length? `<div class="card"><ul class="arch" style="padding:10px 14px">
+    ${fs.map(f=>`<li><code>${esc(f.carpeta||"—")}</code>
+      <small>${esc(f.cliente||"sin cliente")} · ${f.estado==="cerrado"?"cerrada":"borrador"}</small></li>`).join("")}
+    </ul><div class="pad" style="border-top:1px solid var(--linea)">
+      <button class="btn ghost sm" data-copiar="${RAIZ}">Copiar ruta raíz</button></div></div>`
+   : `<div class="vacio"><p>Todavía no hay fichas archivadas.</p></div>`}`;
+}
+
+function vistaInicio(){
+  const q=(S.q||"").toLowerCase().trim();
+  const lista=S.indice.filter(f=>f.suc===S.suc)
+    .filter(f=>!q || (f.patente||"").toLowerCase().includes(q) || (f.cliente||"").toLowerCase().includes(q));
+  const alertas=S.flota.filter(v=>venc(v.rt)||venc(v.permiso));
+  app.innerHTML=`
+    ${SIN_DISCO?`<div class="aviso"><b>Sin almacenamiento persistente.</b><br>Los datos de esta sesión no se guardarán al cerrar.</div>`:""}
+    ${alertas.length?`<div class="aviso"><b>Documentos vencidos</b>
+      ${alertas.map(v=>`<br>${v.patente}: ${venc(v.rt)?"revisión técnica ("+fecha(v.rt)+")":""}${venc(v.rt)&&venc(v.permiso)?" · ":""}${venc(v.permiso)?"permiso de circulación ("+fecha(v.permiso)+")":""}`).join("")}</div>`:""}
+    <div class="row" style="margin:14px 0 4px">
+      <button class="btn acento" data-act="nueva">Nueva ficha</button>
+      <button class="btn ghost" data-act="verFlota">Flota (${S.flota.length})</button>
+      <button class="btn ghost" data-act="verArchivo">Archivo</button>
+      <button class="btn ghost" data-act="ajustes">${hayDrive()?"Drive ✓":"Conectar Drive"}</button>
+    </div>
+    <h2 class="tit" style="font-size:22px;margin:18px 0 8px">Fichas de ${S.suc} <span class="badge">${lista.length}</span></h2>
+    ${S.indice.filter(f=>f.suc===S.suc).length>4?`<input type="text" id="buscar" placeholder="Buscar por patente o cliente" value="${esc(S.q||"")}" style="margin-bottom:10px">`:""}
+    ${lista.length? lista.map(f=>`
+      <button class="ficha" data-abre="${f.id}" data-cerrada="${f.estado==="cerrado"}">
+        <b>${esc(f.patente||"Sin patente")}</b>
+        <small>${esc(f.cliente||"Sin cliente")}</small>
+        <span class="m"><span class="badge ${f.estado==="cerrado"?"ok":"warn"}">${f.estado==="cerrado"?"Cerrada":"Borrador"}</span>
+        ${f.pct}% · ${fecha(f.fi)} → ${fecha(f.ft)}</span>
+      </button>`).join("")
+      : `<div class="vacio"><p>${q?"Nada coincide con esa búsqueda.":"Todavía no hay fichas en esta sucursal."}</p>
+         <button class="btn" data-act="nueva">${q?"Limpiar búsqueda":"Crear la primera"}</button></div>`}`;
+  const b=document.getElementById("buscar");
+  if(b) b.oninput=()=>{ S.q=b.value; const pos=b.selectionStart; vistaInicio();
+    const n=document.getElementById("buscar"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } };
+}
+const venc = d => d && d < hoy();
+
+/* ---------- flota ---------- */
+function vistaFlota(){
+  app.innerHTML=`<div class="row" style="margin:14px 0"><button class="btn ghost" data-act="inicio">Volver</button>
+    <button class="btn" data-act="addVeh">Agregar vehículo</button></div>
+  <p class="hint" style="margin:0 0 10px">Cualquier patente se puede asignar a una ficha de cualquier sucursal. La base solo indica dónde queda habitualmente.</p>
+  ${S.flota.map((v,i)=>`
+    <div class="card"><h3>${esc(v.patente)}</h3><div class="pad">
+      <label class="f"><span>Sucursal base</span><select data-veh="${v.patente}" data-c="suc">${SUCURSALES.map(s=>`<option ${v.suc===s?"selected":""}>${s}</option>`).join("")}</select></label>
+      <label class="f"><span>Mantención programada</span><input type="text" data-veh="${v.patente}" data-c="mant" value="${esc(v.mant)}"></label>
+      <div class="grid">
+        <label class="f"><span>Revisión técnica vence</span><input type="date" data-veh="${v.patente}" data-c="rt" value="${v.rt}"></label>
+        <label class="f"><span>Permiso de circulación hasta</span><input type="date" data-veh="${v.patente}" data-c="permiso" value="${v.permiso}"></label>
+      </div>
+      <div class="row"><span class="badge ${venc(v.rt)?"bad":"ok"}">RT ${venc(v.rt)?"vencida":"vigente"}</span>
+      <span class="badge ${venc(v.permiso)?"bad":"ok"}">Permiso ${venc(v.permiso)?"vencido":"vigente"}</span>
+      <button class="btn ghost sm" data-delveh="${v.patente}" style="margin-left:auto">Eliminar</button></div>
+    </div></div>`).join("")}`;
+}
+
+/* ---------- ficha ---------- */
+function vistaFicha(){
+  const r=S.r;
+  const secciones={datos:secDatos,prep:secPrep,entrega:secEntrega,revision:secRevision,reporte:secReporte};
+  const ix=ETAPAS.findIndex(e=>e.k===S.etapa);
+  app.innerHTML = `${hayDrive()?"":`<div class="aviso" style="margin:12px 0 0"><b>Drive sin conectar.</b><br>
+      Las fotos quedan solo en este teléfono y los videos se pierden al cerrar.
+      <button class="btn ghost sm" data-act="ajustes" style="margin-top:8px">Conectar ahora</button></div>`}
+    <div class="row" style="margin:14px 0 2px">
+      <button class="btn ghost sm" data-act="inicio">Fichas</button>
+      <button class="btn ghost sm" data-act="borrar" style="margin-left:auto">Eliminar</button>
+    </div>`
+    + secciones[S.etapa](r)
+    + `<div class="row" style="margin:16px 0">
+        ${ix>0?`<button class="btn ghost" data-etapa="${ETAPAS[ix-1].k}">← ${ETAPAS[ix-1].t}</button>`:""}
+        ${ix<ETAPAS.length-1?`<button class="btn acento" data-etapa="${ETAPAS[ix+1].k}" style="margin-left:auto">${ETAPAS[ix+1].t} →</button>`
+        :`<button class="btn acento wide" data-act="cerrar">${r.estado==="cerrado"?"Reabrir ficha":"Cerrar ficha"}</button>`}
+      </div>`;
+}
+
+function resumenAdic(r){
+  const a=r.adicionales||[];
+  return a.length ? a.join(", ") : "Ninguno seleccionado";
+}
+function secDatos(r){
+  const veh=ordenaFlota(S.flota);
+  const v=S.flota.find(x=>x.patente===r.patente);
+  return `<div class="card"><h3>Datos del arriendo</h3><div class="pad">
+    <div class="grid">
+      <label class="f"><span>Sucursal</span><select data-set="suc">${SUCURSALES.map(s=>`<option ${r.suc===s?"selected":""}>${s}</option>`).join("")}</select></label>
+      <label class="f"><span>Patente</span><select data-set="patente"><option value="">Seleccionar…</option>
+        ${veh.map(x=>`<option value="${x.patente}" ${r.patente===x.patente?"selected":""}>${x.patente}${x.suc&&x.suc!==r.suc?" · base "+x.suc:""}</option>`).join("")}</select></label>
+    </div>
+    ${v?`<p class="hint">Mantención: ${esc(v.mant)} · RT ${fecha(v.rt)} <span class="badge ${venc(v.rt)?"bad":"ok"}">${venc(v.rt)?"vencida":"vigente"}</span> · Permiso ${fecha(v.permiso)} <span class="badge ${venc(v.permiso)?"bad":"ok"}">${venc(v.permiso)?"vencido":"vigente"}</span></p>`:""}
+    <label class="f"><span>Cliente</span><input type="text" data-set="cliente" value="${esc(r.cliente)}" placeholder="Nombre y apellido"></label>
+    <div class="grid">
+      <label class="f"><span>Fecha inicio</span><input type="date" data-set="fi" value="${r.fi}"></label>
+      <label class="f"><span>Fecha término</span><input type="date" data-set="ft" value="${r.ft}"></label>
+    </div>
+    <p class="hint">La devolución es a más tardar a las 11:00 del día siguiente a la fecha de término.${r.ft?"":" <b>Esta fecha define cuándo se purgan los videos, así que es obligatoria para cerrar la ficha.</b>"}</p>
+    <span style="display:block;font-size:13px;color:var(--gris);margin:12px 0 3px">Adicionales contratados</span>
+    <details class="desplegable" ${(r.adicionales||[]).length?"":"open"}>
+      <summary>Elegir adicionales <b id="adicResumen">${esc(resumenAdic(r))}</b></summary>
+      <ul class="items">${ADICIONALES.map(a=>`<li>
+        <button class="chk" data-adic="${a}" aria-pressed="${(r.adicionales||[]).includes(a)}"><span class="box"></span>${a}</button></li>`).join("")}</ul>
+    </details>
+    <label class="f"><span>Observaciones</span><textarea data-set="obs" placeholder="Opcional">${esc(r.obs)}</textarea></label>
+  </div></div>`;
+}
+
+function secPrep(r){
+  const[n,t]=prog(r,"prep"), ad=adicSel(r);
+  return `<div class="card"><h3>Preparación <em>${n} de ${t}</em></h3>
+    <ul class="items">${PREP.map((it,i)=>`<li>
+      <button class="chk" data-chk="p${i}" aria-pressed="${!!r.prep["p"+i]}"><span class="box"></span>${it}</button></li>`).join("")}</ul>
+    ${ad.length?`<div class="sub">Adicionales contratados</div>
+      <ul class="items">${ad.map(a=>`<li>
+        <button class="chk" data-chk="a:${esc(a)}" aria-pressed="${!!r.prep["a:"+a]}"><span class="box"></span>${a}</button></li>`).join("")}</ul>`
+     :`<p class="hint" style="padding:10px 14px;margin:0;border-top:1px solid var(--linea)">Sin adicionales contratados. Se agregan desde Arriendo.</p>`}
+    <div class="pad" style="border-top:1px solid var(--linea)">
+      <label class="f"><span>Notas de preparación</span><textarea data-set="prepNota" placeholder="Repuestos pendientes, detalles a resolver…">${esc(r.prepNota)}</textarea></label>
+      <button class="btn ghost sm" data-act="prepNone">Limpiar marcas</button>
+    </div></div>`;
+}
+
+function secEntrega(r){
+  return `<div class="card"><h3>Registro audiovisual de entrega</h3>
+    ${SLOTS.filter(s=>s.et==="entrega").map(s=>slotHTML(s,r)).join("")}</div>
+  <div class="card"><h3>Millaje y firma</h3><div class="pad">
+    <label class="f"><span>Millaje de salida</span><input type="number" inputmode="numeric" data-set="entrega.km" value="${esc(r.entrega.km)}" placeholder="Ej: 189603"></label>
+    <span style="display:block;font-size:13px;color:var(--gris);margin-bottom:3px">Firma del cliente</span>
+    ${r.entrega.firma?`<img src="${r.entrega.firma}" alt="Firma registrada" style="width:100%;max-width:320px;border:1px solid var(--linea);border-radius:4px;background:#fff">
+      <div class="row" style="margin-top:8px"><button class="btn ghost sm" data-act="firmar">Volver a firmar</button></div>`
+     :`<button class="btn ghost wide" data-act="firmar">Capturar firma</button>`}
+  </div></div>`;
+}
+
+function secRevision(r){
+  return `<div class="card"><h3>Tablero de llegada</h3>${slotHTML(SLOTS.find(s=>s.k==="f_tab_l"),r)}</div>
+  ${REV_GRUPOS.map(g=>{
+    const its=itemsRev(g,r), hayAd=its.some(x=>x.adic);
+    return `<div class="card"><h3>${g.t} <em>${its.filter(x=>r.rev[x.k]).length} de ${its.length}</em></h3>
+    <ul class="items">${its.map(x=>{
+      const v=r.rev[x.k]||"";
+      return `<li><div class="tri"><p>${x.t}${x.adic?` <span class="badge">adicional</span>`:""}</p><span class="set">
+        ${[["ok","OK"],["dano","Daño"]].map(([val,lab])=>
+          `<button data-tri="${esc(x.k)}" data-v="${val}" aria-pressed="${v===val}">${lab}</button>`).join("")}
+        </span>${v==="dano"?`
+        <textarea data-set="revNota.${esc(x.k)}" placeholder="Observación (opcional)">${esc(r.revNota[x.k]||"")}</textarea>
+        <div class="resp">
+          <button class="btn ghost sm" data-add="rev:${esc(x.k)}" data-tipo="foto" data-cam="1">Tomar foto</button>
+          <button class="btn ghost sm" data-add="rev:${esc(x.k)}" data-tipo="mixto">Adjuntar respaldo</button>
+        </div>
+        <div class="tiras">${(r.media["rev:"+x.k]||[]).map(m=>tiraHTML(m,"rev:"+x.k)).join("")}</div>`:""}</div></li>`;
+    }).join("")}</ul></div>`;
+  }).join("")}`;
+}
+
+/* ══════════ RUTAS Y NOMBRES DE ARCHIVO ══════════ */
+const RAIZ = "Camperspot";
+function slug(s){
+  return String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .replace(/[^A-Za-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,32) || "sin-dato";
+}
+const mesDe = r => (r.ft||r.fi||hoy()).slice(0,7);
+const nombreCarpeta = r => `${(r.ft||r.fi||hoy())}_${slug(r.patente)||"SIN-PATENTE"}_${slug(r.cliente)}`;
+function rutas(r){
+  const base=`${RAIZ}/${nombreCarpeta(r)}`;
+  return { base, carpeta:nombreCarpeta(r), mes:mesDe(r),
+           videos:`${base}/Videos`, ficha:`${base}/Ficha`, danos:`${base}/Daños` };
+}
+const EXT = n => { const p=String(n||"").split("."); return p.length>1 ? p.pop().toLowerCase() : "jpg"; };
+const NOMBRES = {
+  v_ext:"1-exterior-y-bajo", v_int:"2-interior", v_tec:"3-techo",
+  f_tab_s:"tablero-salida", f_tab_l:"tablero-llegada",
+};
+function archivosDe(r){
+  const out={videos:[], ficha:[{n:"ficha.json"},{n:"resumen.txt"}], danos:[]};
+  ["v_ext","v_int","v_tec"].forEach(k=>(r.media[k]||[]).forEach((m,i)=>
+    out.videos.push({n:`${NOMBRES[k]}${i?"-"+(i+1):""}.${EXT(m.nombre)}`})));
+  ["f_tab_s","f_tab_l"].forEach(k=>(r.media[k]||[]).forEach((m,i)=>
+    out.ficha.push({n:`${NOMBRES[k]}${i?"-"+(i+1):""}.${EXT(m.nombre)}`})));
+  hallazgos(r).forEach(h=>h.media.forEach((m,i)=>
+    out.danos.push({n:`${slug(h.t)}${i?"-"+(i+1):""}.${EXT(m.nombre)}`, d:h.t})));
+  (r.danos||[]).forEach(d=>(d.fotos||[]).forEach((m,i)=>
+    out.danos.push({n:`${slug(d.zona||"sin-zona")}${i?"-"+(i+1):""}.${EXT(m.nombre)}`, d:d.zona||""})));
+  return out;
+}
+
+function hallazgos(r){
+  const out=[];
+  REV_GRUPOS.forEach(g=>itemsRev(g,r).forEach(x=>{
+    const media=r.media["rev:"+x.k]||[];
+    if(r.rev[x.k]==="dano" || media.length)
+      out.push({grupo:g.t, t:x.t, nota:r.revNota[x.k]||"", media, slot:"rev:"+x.k});
+  }));
+  return out;
+}
+function secReporte(r){
+  const km = (+r.reporte.km||0)-(+r.entrega.km||0);
+  const hs = hallazgos(r);
+  const total = hs.length + r.danos.length;
+  const adj = hs.reduce((a,h)=>a+h.media.length,0) + r.danos.reduce((a,d)=>a+(d.fotos||[]).length,0);
+  return `<div class="card"><h3>Resumen de daños <em>${total} hallazgo(s) · ${adj} respaldo(s)</em></h3>
+    ${hs.map(h=>`<div class="slot">
+      <h4>${esc(h.t)} <span class="badge bad">Daño</span></h4>
+      <p>${esc(h.grupo)}${h.nota?" — "+esc(h.nota):""}</p>
+      ${h.media.length?`<div class="tiras">${h.media.map(m=>tiraHTML(m,h.slot)).join("")}</div>`
+        :`<span class="badge warn">Sin respaldo adjunto</span>`}
+    </div>`).join("")}
+    ${r.danos.map(d=>`<div class="slot">
+      <div class="row" style="align-items:center"><h4 style="flex:1">${esc(d.zona||"Daño sin zona")} <span class="badge bad">Agregado aquí</span></h4>
+        <button class="btn ghost sm" data-deldano="${d.id}">Quitar</button></div>
+      <label class="f" style="margin:8px 0 6px"><input type="text" data-dano="${d.id}" data-c="zona" value="${esc(d.zona)}" placeholder="Zona: costado izquierdo, techo, WC…"></label>
+      <label class="f"><textarea data-dano="${d.id}" data-c="desc" placeholder="Descripción (opcional)">${esc(d.desc)}</textarea></label>
+      <div class="row">
+        <button class="btn ghost sm" data-add="dano" data-dano="${d.id}" data-tipo="foto" data-cam="1">Tomar foto</button>
+        <button class="btn ghost sm" data-add="dano" data-dano="${d.id}" data-tipo="mixto">Adjuntar respaldo</button>
+      </div>
+      <div class="tiras">${(d.fotos||[]).map(m=>tiraHTML(m,"",d.id)).join("")}</div>
+    </div>`).join("")}
+    ${total?"":`<div class="pad" style="padding-bottom:0"><p class="hint" style="margin:0">Sin daños registrados. Todo lo revisado en la etapa anterior quedó en OK.</p></div>`}
+    <div class="pad"><button class="btn wide ghost" data-act="addDano">Agregar un daño</button></div>
+  </div>
+  <div class="card"><h3>Cierre</h3><div class="pad">
+    <div class="grid">
+      <label class="f"><span>Millaje de llegada</span><input type="number" inputmode="numeric" data-set="reporte.km" value="${esc(r.reporte.km)}" placeholder="Ej: 190450"></label>
+      <label class="f"><span>Uso de millaje</span><input type="text" value="${km>0?km.toLocaleString("es-CL"):"—"}" readonly style="background:#EAEEE0"></label>
+    </div>
+    <div class="grid">
+      <label class="f"><span>Estado de bencina</span><select data-set="reporte.bencina">
+        <option value="">Seleccionar…</option><option ${r.reporte.bencina==="Lleno"?"selected":""}>Lleno</option>
+        <option ${r.reporte.bencina==="Reponer"?"selected":""}>Reponer</option></select></label>
+      <label class="f"><span>Pedir gas (balones)</span><select data-set="reporte.gas">
+        ${["0","1","2"].map(g=>`<option ${r.reporte.gas===g?"selected":""}>${g}</option>`).join("")}</select></label>
+    </div>
+    <label class="f"><span>Comentario final</span><textarea data-set="reporte.nota" placeholder="Qué queda pendiente para el próximo arriendo">${esc(r.reporte.nota)}</textarea></label>
+    <button class="btn wide" data-act="resumen" style="margin-top:6px">Ver resumen del arriendo</button>
+  </div></div>
+  ${cardArchivo(r)}`;
+}
+
+function cardArchivo(r){
+  const ru=rutas(r), ar=archivosDe(r);
+  const bloque=(titulo,ruta,lista,vacio)=>`<div class="ruta"><span>${titulo}</span>
+    <code>${esc(ruta)}</code>
+    <button class="btn ghost sm" data-copiar="${esc(ruta)}">Copiar ruta</button>
+    <ul class="arch">${lista.length?lista.map(a=>`<li><code>${esc(a.n)}</code>${a.d?`<small>${esc(a.d)}</small>`:""}</li>`).join("")
+      :`<li class="vacia">${vacio}</li>`}</ul></div>`;
+  return `<div class="card"><h3>Dónde se guarda</h3><div class="pad">
+    <div class="ruta" style="background:#F2F5EA"><span>Carpeta del arriendo</span>
+      <code>${esc(ru.base)}</code>
+      <button class="btn ghost sm" data-copiar="${esc(ru.base)}">Copiar ruta</button></div>
+    ${bloque("Videos", ru.videos, ar.videos, "Ningún video adjunto")}
+    ${bloque("Ficha", ru.ficha, ar.ficha, "—")}
+    ${bloque("Daños", ru.danos, ar.danos, "Sin daños registrados")}
+    <div class="row" style="margin-top:12px">
+      <button class="btn ghost sm" data-act="bajarResumen">Descargar resumen.txt</button>
+      <button class="btn ghost sm" data-act="bajarJson">Descargar ficha.json</button>
+    </div>
+  </div></div>`;
+}
+
+function slotHTML(s,r){
+  const ms=r.media[s.k]||[];
+  return `<div class="slot"><h4>${s.t} ${ms.length?`<span class="badge ok">${ms.length}</span>`:`<span class="badge warn">Pendiente</span>`}</h4>
+    <p>${s.d}</p>
+    <div class="row">
+      ${s.tipo==="video"
+        ? `<button class="btn ghost sm" data-add="${s.k}" data-tipo="video">Adjuntar video</button>`
+        : `<button class="btn ghost sm" data-add="${s.k}" data-tipo="foto" data-cam="1">Tomar foto</button>
+           <button class="btn ghost sm" data-add="${s.k}" data-tipo="foto">Elegir archivo</button>`}
+    </div>
+    ${s.tipo==="video"?`<p class="hint">Graba con la app de cámara del teléfono y adjunta el archivo desde la galería. Así conserva la resolución original.</p>`:""}
+    <div class="tiras">${ms.map(m=>tiraHTML(m,s.k)).join("")}</div></div>`;
+}
+function tiraHTML(m,slot,danoId){
+  const cuerpo = m.tipo==="foto"
+    ? (FOTOS[m.id]?`<img src="${FOTOS[m.id]}" alt="">`:`<em class="txt">Foto</em>`)
+    : (VIDEOS[m.id]?`<video src="${VIDEOS[m.id]}" muted playsinline preload="metadata"></video><em>Video</em>`
+                   :`<em class="txt">Video<br>no disponible</em>`);
+  const est = m.estado || (m.driveId ? "listo" : "");
+  const marca = est==="listo" ? `<i class="ok">✓</i>`
+    : est==="error" ? `<i class="err">!</i>`
+    : est ? `<span class="pb-caja"><span class="pb" style="width:${m.pct||0}%"></span></span>` : "";
+  return `<button class="tira" data-ver="${m.id}" data-slot="${slot||""}" data-dano="${danoId||""}"
+    data-estado="${est}" aria-label="Ver ${m.tipo}">${cuerpo}${marca}</button>`;
+}
+
+let VISOR=null;
+function verMedia(id,slot,danoId){
+  VISOR={id,slot,danoId};
+  const foto=FOTOS[id], video=VIDEOS[id], m=buscaMedia(id);
+  const cuerpo = foto ? `<img src="${foto}" alt="" style="width:100%;border-radius:4px;display:block">`
+    : video ? `<video src="${video}" controls playsinline style="width:100%;border-radius:4px;display:block;background:#000"></video>`
+    : (m && m.driveId)
+      ? `<div class="aviso" style="margin:0"><b>Video guardado en Drive.</b><br>Ábrelo desde la carpeta del arriendo.</div>
+         <a class="btn ghost wide" style="margin-top:10px;text-decoration:none"
+            href="https://drive.google.com/file/d/${m.driveId}/view" target="_blank" rel="noopener">Abrir en Drive</a>`
+      : `<div class="aviso" style="margin:0"><b>Video no disponible en este teléfono.</b><br>Se subió desde otro dispositivo o la sesión se cerró antes de terminar.</div>`;
+  modal(`${cuerpo}<div class="row" style="margin-top:12px">
+    <button class="btn ghost" data-act="borrarMedia" style="flex:1">Eliminar</button></div>`);
+}
+
+/* ══════════ EVENTOS ══════════ */
+document.addEventListener("click", async ev=>{
+  const t=ev.target.closest("button"); if(!t) return;
+  const d=t.dataset;
+
+  if(d.suc){ S.suc=d.suc; pinta(); return; }
+  if(d.etapa){ S.etapa=d.etapa; pinta(); return; }
+  if(d.abre){ await abreFicha(d.abre); return; }
+  if(d.chk!=null){ S.r.prep[d.chk]=!S.r.prep[d.chk];
+    t.setAttribute("aria-pressed",!!S.r.prep[d.chk]); pintaRail(); pintaPie(); guardaFicha(); return; }
+  if(d.adic){
+    const v=d.adic; let a=(S.r.adicionales||[]).slice();
+    if(v==="Ninguno") a = a.includes("Ninguno") ? [] : ["Ninguno"];
+    else { a=a.filter(x=>x!=="Ninguno"); a = a.includes(v) ? a.filter(x=>x!==v) : [...a,v]; }
+    S.r.adicionales=a;
+    document.querySelectorAll("[data-adic]").forEach(b=>b.setAttribute("aria-pressed", a.includes(b.dataset.adic)));
+    const s=document.getElementById("adicResumen"); if(s) s.textContent=resumenAdic(S.r);
+    guardaFicha(); return;
+  }
+  if(d.tri){ const k=d.tri; S.r.rev[k] = S.r.rev[k]===d.v ? "" : d.v; guardaFicha(); pinta(true); return; }
+  if(d.ver){ verMedia(d.ver, d.slot, d.dano||null); return; }
+  if(d.add){ pedirArchivo(d.add, d.tipo, d.cam, d.dano||null); return; }
+  if(d.deldano){ confirmar("¿Quitar este daño y sus respaldos?", async()=>{ for(const m of (S.r.danos.find(x=>x.id===d.deldano)||{}).fotos||[]) await quitaArchivo(m.id); S.r.danos=S.r.danos.filter(x=>x.id!==d.deldano); await guardaFicha(); pinta(true); }); return; }
+  if(d.delveh){ confirmar(`¿Eliminar ${d.delveh} de la flota?`, async()=>{ S.flota=S.flota.filter(v=>v.patente!==d.delveh); await St.set("flota",JSON.stringify(S.flota)); pinta(true); }, "Eliminar"); return; }
+
+  if(d.copiar){ copiar(d.copiar, "Ruta copiada"); return; }
+
+  switch(d.act){
+    case "verArchivo": S.vista="archivo"; pinta(); break;
+    case "ajustes": S.vista="ajustes"; pinta(); break;
+    case "bajarResumen": baja(nombreCarpeta(S.r)+"_resumen.txt", textoResumen(S.r), "text/plain"); break;
+    case "bajarJson": baja(nombreCarpeta(S.r)+"_ficha.json", JSON.stringify(fichaExport(S.r),null,2), "application/json"); break;
+    case "nueva": S.r=nuevaFicha(); S.vista="ficha"; S.etapa="datos"; pinta(); break;
+    case "inicio": {
+      const enBlanco = S.r && !S.indice.some(x=>x.id===S.r.id);
+      S.vista="inicio"; S.r=null; pinta();
+      if(enBlanco) flash("Ficha en blanco descartada");
+      break; }
+    case "verFlota": S.vista="flota"; pinta(); break;
+    case "guardar": await guardaFicha(true); flash(S.indice.some(x=>x.id===S.r.id)?"Guardado":"Ficha creada"); pintaPie(); break;
+    case "prepNone": confirmar("¿Desmarcar todos los ítems de preparación?", async()=>{ S.r.prep={}; await guardaFicha(); pinta(true); }); break;
+    case "addDano": { const nd={id:uid(),zona:"",desc:"",fotos:[]}; S.r.danos.push(nd); await guardaFicha(); pinta(true);
+      const c=document.querySelector(`[data-dano="${nd.id}"][data-c="zona"]`); if(c){ c.scrollIntoView({block:"center",behavior:"smooth"}); c.focus({preventScroll:true}); } break; }
+    case "firmar": modalFirma(); break;
+    case "resumen": modalResumen(); break;
+    case "borrar": confirmar("Se elimina la ficha completa con sus fotos. No se puede deshacer.", ()=>borraFicha(S.r.id), "Eliminar"); break;
+    case "cerrar": { const cerrando=S.r.estado!=="cerrado";
+      if(cerrando && !S.r.ft){ S.etapa="datos"; pinta();
+        flash("Falta la fecha de término");
+        const f=document.querySelector('[data-set="ft"]'); if(f){ f.scrollIntoView({block:"center"}); f.focus({preventScroll:true}); }
+        break; } S.r.estado=cerrando?"cerrado":"borrador"; await guardaFicha();
+      if(cerrando){
+        if(pendientes()){ flash("Espera a que terminen las subidas"); S.r.estado="borrador"; break; }
+        const ficha=S.r;
+        if(hayDrive()){ flash("Subiendo documentos…",true);
+          try{ await subeDocumentos(ficha); flash("Ficha cerrada y respaldada"); }
+          catch(e){ flash("Ficha cerrada, pero falló el respaldo: "+e.message); } }
+        else flash("Ficha cerrada");
+        S.vista="inicio"; S.r=null; pinta();
+      } else pinta(true); break; }
+    case "addVeh": modalVehiculo(); break;
+    case "borrarMedia": if(VISOR){ const v=VISOR; VISOR=null; cierraModal(); await quitaMedia(v.slot, v.id, v.danoId); } break;
+    case "confirmarSi": if(PENDIENTE){ const f=PENDIENTE; PENDIENTE=null; cierraModal(); await f(); } break;
+    case "cerrarModal": cierraModal(); break;
+  }
+});
+
+let tmr;
+document.addEventListener("input", ev=>{
+  const el=ev.target, d=el.dataset;
+  if(d.veh){ const v=S.flota.find(x=>x.patente===d.veh); if(v){ v[d.c]=el.value; clearTimeout(tmr);
+    tmr=setTimeout(()=>St.set("flota",JSON.stringify(S.flota)),400);} return; }
+  if(d.dano){ const x=S.r.danos.find(y=>y.id===d.dano); if(x){ x[d.c]=el.value; deb(); } return; }
+  if(d.set){ const ruta=d.set.split("."); let o=S.r;
+    for(let i=0;i<ruta.length-1;i++) o=o[ruta[i]];
+    o[ruta.at(-1)]=el.value;
+    if(d.set==="suc"||d.set==="patente"){ deb(); pinta(true); return; }
+    pintaRail(); pintaPie(); deb(); }
+});
+function deb(){ clearTimeout(tmr); tmr=setTimeout(guardaFicha,600); }
+document.addEventListener("blur", e=>{ if(S.r && e.target.dataset && (e.target.dataset.set||e.target.dataset.dano)){ clearTimeout(tmr); guardaFicha(); } }, true);
+document.addEventListener("visibilitychange", ()=>{ if(document.hidden && S.r){ clearTimeout(tmr); guardaFicha(); } });
+
+function pedirArchivo(slot,tipo,cam,danoId){
+  const inp=document.createElement("input");
+  inp.type="file"; inp.multiple=true;
+  inp.accept = tipo==="video" ? "video/*" : tipo==="mixto" ? "image/*,video/*" : "image/*";
+  if(cam) inp.setAttribute("capture","environment");
+  inp.onchange=()=>subir(slot,inp.files,danoId);
+  inp.click();
+}
+
+/* ══════════ MODALES ══════════ */
+let PENDIENTE=null;
+const cierraModal = ()=>{ document.getElementById("modales").innerHTML=""; };
+function confirmar(texto, accion, etiqueta){
+  PENDIENTE=accion;
+  modal(`<h3>Confirmar</h3><p style="margin:0 0 4px">${esc(texto)}</p>
+    <div class="row" style="margin-top:14px"><button class="btn acento" data-act="confirmarSi" style="flex:1">${esc(etiqueta||"Sí, continuar")}</button></div>`);
+}
+function modalVehiculo(){
+  modal(`<h3>Agregar vehículo</h3>
+    <label class="f"><span>Patente</span><input type="text" id="nvPat" placeholder="Ej: SFCX21" autocapitalize="characters"></label>
+    <label class="f"><span>Sucursal base</span><select id="nvSuc">${SUCURSALES.map(x=>`<option>${x}</option>`).join("")}</select></label>
+    <button class="btn acento wide" id="nvOk">Agregar</button>`);
+  const i=document.getElementById("nvPat"); i.focus();
+  document.getElementById("nvOk").onclick=async()=>{
+    const pat=i.value.toUpperCase().trim();
+    if(!pat) return flash("Escribe la patente");
+    if(S.flota.some(v=>v.patente===pat)) return flash("Esa patente ya existe");
+    S.flota.push({patente:pat,suc:document.getElementById("nvSuc").value,mant:"",rt:"",permiso:""});
+    S.flota=ordenaFlota(S.flota);
+    await St.set("flota",JSON.stringify(S.flota)); cierraModal(); pinta(); flash(pat+" agregada");
+  };
+}
+function modal(html){
+  document.getElementById("modales").innerHTML =
+    `<div class="modal"><div class="box">${html}
+      <div class="row" style="margin-top:14px"><button class="btn ghost wide" data-act="cerrarModal">Cerrar</button></div></div></div>`;
+}
+function modalFirma(){
+  modal(`<h3>Firma del cliente</h3><p class="hint" style="margin-bottom:8px">Firme con el dedo sobre el recuadro.</p>
+    <canvas class="sig" id="sig"></canvas>
+    <div class="row" style="margin-top:10px"><button class="btn ghost" id="sigClr">Borrar</button>
+    <button class="btn acento" id="sigOk" style="flex:1">Guardar firma</button></div>`);
+  const c=document.getElementById("sig");
+  c.width=c.offsetWidth*2; c.height=c.offsetHeight*2;
+  const x=c.getContext("2d"); x.scale(2,2); x.lineWidth=2.2; x.lineCap="round"; x.strokeStyle="#1A1E12";
+  let dib=false, vacio=true;
+  const pt=e=>{const b=c.getBoundingClientRect();return[e.clientX-b.left,e.clientY-b.top]};
+  c.addEventListener("pointerdown",e=>{dib=true;vacio=false;c.setPointerCapture(e.pointerId);x.beginPath();x.moveTo(...pt(e))});
+  c.addEventListener("pointermove",e=>{if(dib){x.lineTo(...pt(e));x.stroke()}});
+  c.addEventListener("pointerup",()=>dib=false);
+  document.getElementById("sigClr").onclick=()=>{x.clearRect(0,0,c.width,c.height);vacio=true};
+  document.getElementById("sigOk").onclick=async()=>{
+    if(vacio) return flash("La firma está vacía");
+    S.r.entrega.firma=c.toDataURL("image/png");
+    document.getElementById("modales").innerHTML=""; await guardaFicha(); pinta();
+  };
+}
+function textoResumen(r){
+  const L=[], [n,t]=progTotal(r);
+  L.push(`CHECKLIST MOTORHOME — CAMPERSPOT ${r.suc.toUpperCase()}`);
+  L.push(`Patente: ${r.patente||"—"}   Cliente: ${r.cliente||"—"}`);
+  L.push(`Arriendo: ${fecha(r.fi)} → ${fecha(r.ft)}`);
+  L.push(`Avance: ${Math.round(n/t*100)}%   Estado: ${r.estado}`);
+  L.push(`Adicionales: ${(r.adicionales||[]).length?r.adicionales.join(", "):"—"}`);
+  if(r.obs) L.push(`Observaciones: ${r.obs}`);
+  const itp=itemsPrep(r), pend=itp.filter(x=>!r.prep[x.k]);
+  L.push(``,`PREPARACIÓN: ${itp.length-pend.length}/${itp.length}`);
+  if(pend.length) L.push(`Pendiente: ${pend.map(x=>x.t+(x.adic?" (adicional)":"")).join(", ")}`);
+  if(r.prepNota) L.push(`Nota: ${r.prepNota}`);
+  L.push(``,`ENTREGA`,`Millaje de salida: ${r.entrega.km||"—"}`);
+  SLOTS.filter(s=>s.et==="entrega").forEach(s=>L.push(`${s.t}: ${(r.media[s.k]||[]).length} archivo(s)`));
+  L.push(`Firma del cliente: ${r.entrega.firma?"registrada":"pendiente"}`);
+  L.push(``,`REVISIÓN`);
+  REV_GRUPOS.forEach(g=>{
+    const its=itemsRev(g,r);
+    const mal=its.map(x=>({t:x.t+(x.adic?" (adicional)":""),v:r.rev[x.k],nota:r.revNota[x.k],
+      n:(r.media["rev:"+x.k]||[]).length})).filter(x=>x.v==="dano"||x.n);
+    const ok=its.filter(x=>r.rev[x.k]==="ok").length;
+    L.push(`${g.t}: ${ok}/${its.length} OK`);
+    mal.forEach(x=>L.push(`  · ${x.t} — DAÑO${x.nota?": "+x.nota:""}${x.n?` [${x.n} respaldo/s]`:" [sin respaldo]"}`));
+  });
+  L.push(``,`REPORTE FINAL`);
+  const uso=(+r.reporte.km||0)-(+r.entrega.km||0);
+  L.push(`Millaje de llegada: ${r.reporte.km||"—"}   Uso: ${uso>0?uso.toLocaleString("es-CL"):"—"}`);
+  L.push(`Bencina: ${r.reporte.bencina||"—"}   Pedir gas: ${r.reporte.gas||"0"}`);
+  const hs=hallazgos(r);
+  L.push(``,`RESUMEN DE DAÑOS: ${hs.length+r.danos.length} hallazgo(s)`);
+  hs.forEach(h=>L.push(`  · ${h.t} (${h.grupo}) — DAÑO${h.nota?": "+h.nota:""} [${h.media.length} respaldo/s]`));
+  r.danos.forEach(d=>L.push(`  · ${d.zona||"sin zona"}: ${d.desc||"sin descripción"} [${(d.fotos||[]).length} respaldo/s]`));
+  if(!hs.length&&!r.danos.length) L.push(`  Sin daños registrados.`);
+  if(r.reporte.nota) L.push(`Comentario: ${r.reporte.nota}`);
+  return L.join("\n");
+}
+function modalResumen(){
+  const txt=textoResumen(S.r);
+  modal(`<h3>Resumen de la ficha</h3><pre class="res" id="res">${esc(txt)}</pre>
+    <div class="row" style="margin-top:10px"><button class="btn acento" id="copiar" style="flex:1">Copiar para WhatsApp</button>
+    <button class="btn ghost" id="imprimir">Imprimir</button></div>`);
+  document.getElementById("copiar").onclick=async()=>{
+    try{ await navigator.clipboard.writeText(txt); flash("Resumen copiado"); }
+    catch(e){ const p=document.getElementById("res"); const s=getSelection();
+      s.removeAllRanges(); const rg=document.createRange(); rg.selectNodeContents(p); s.addRange(rg);
+      flash("Selecciónalo y copia con Ctrl+C"); }
+  };
+  document.getElementById("imprimir").onclick=()=>window.print();
+}
+async function copiar(txt,msg){
+  try{ await navigator.clipboard.writeText(txt); flash(msg||"Copiado"); }
+  catch(e){ modal(`<h3>Copia esto</h3><pre class="res">${esc(txt)}</pre>`); }
+}
+function baja(nombre,contenido,tipo){
+  try{
+    const b=new Blob([contenido],{type:tipo}), u=URL.createObjectURL(b);
+    const a=document.createElement("a"); a.href=u; a.download=nombre; a.click();
+    setTimeout(()=>URL.revokeObjectURL(u),3000); flash("Descargando "+nombre);
+  }catch(e){ modal(`<h3>${esc(nombre)}</h3><pre class="res">${esc(contenido)}</pre>`); }
+}
+function fichaExport(r){
+  const ru=rutas(r), ar=archivosDe(r);
+  const {media, ...resto}=r;
+  return {...resto, rutas:ru, archivos:ar, exportado:new Date().toISOString()};
+}
+function flash(msg,fijo){
+  let e=document.getElementById("flash");
+  if(!e){ e=document.createElement("div"); e.id="flash";
+    e.style.cssText="position:fixed;left:50%;transform:translateX(-50%);bottom:78px;background:#26380B;color:#fff;padding:9px 15px;border-radius:4px;font-size:14px;z-index:80;pointer-events:none";
+    document.body.appendChild(e); }
+  e.textContent=msg; e.style.opacity="1";
+  clearTimeout(e._t); if(!fijo) e._t=setTimeout(()=>e.style.opacity="0",1900);
+}
+
+(function(){ const l=document.querySelector(".logo");
+  if(l){ const k=document.createElement("link"); k.rel="icon"; k.href=l.src; document.head.appendChild(k); } })();
+window.addEventListener("beforeunload", e=>{
+  if(pendientes()){ e.preventDefault(); e.returnValue=""; }
+});
+bootstrap();
+</script>
