@@ -672,6 +672,32 @@ async function subeArchivo(t){
   delete ARCHIVOS[t.id];
 }
 
+async function carpetaRaiz(){
+  if(CFG.raizId) return CFG.raizId;
+  const { carpetaId } = await api("/carpeta", { ruta:[RAIZ] });
+  CFG.raizId = carpetaId; await guardaCfg();
+  return carpetaId;
+}
+async function carpetaArriendo(r){
+  if(r.driveCarpeta) return r.driveCarpeta;
+  const padreId = await carpetaRaiz();
+  const { carpetaId } = await api("/carpeta", { ruta:[nombreCarpeta(r)], padreId });
+  r.driveCarpeta = carpetaId;
+  if(S.r && S.r.id===r.id) S.r.driveCarpeta = carpetaId;
+  return carpetaId;
+}
+/* Los ids se guardan en la ficha para no volver a buscarlos en cada archivo */
+async function carpetaSub(r, sub){
+  r.driveSubs = r.driveSubs || {};
+  if(r.driveSubs[sub]) return r.driveSubs[sub];
+  const padreId = await carpetaArriendo(r);
+  const { carpetaId } = await api("/carpeta", { ruta:[sub], padreId });
+  r.driveSubs[sub] = carpetaId;
+  if(S.r && S.r.id===r.id){ S.r.driveSubs = S.r.driveSubs||{}; S.r.driveSubs[sub]=carpetaId; }
+  return carpetaId;
+}
+const linkCarpeta = id => id ? `https://drive.google.com/drive/folders/${id}` : "";
+
 /* Sube ficha.json y resumen.txt */
 async function subeDocumentos(r){
   if(!hayDrive()) return;
