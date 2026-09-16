@@ -813,6 +813,45 @@ function buscaMedia(id){
   return null;
 }
 
+async function diagnostico(){
+  const r=S.r;
+  const L=[];
+  L.push("Carpeta del arriendo: "+nombreCarpeta(r));
+  L.push("id carpeta arriendo: "+(r.driveCarpeta||"(no creada)"));
+  L.push("id raíz Camperspot: "+(CFG.raizId||"(no guardado)"));
+  L.push("");
+  try{
+    const p=await api("/ping"); L.push("Worker versión: "+(p.version||"antigua, actualízalo"));
+  }catch(e){ L.push("Worker no responde: "+corta(e.message)); }
+  L.push("");
+  const subs=r.driveSubs||{};
+  L.push("Carpetas guardadas: "+(Object.keys(subs).length?"":"(ninguna)"));
+  for(const k of Object.keys(subs)) L.push("  "+k+" → "+subs[k]);
+  L.push("");
+  for(const def of SLOTS_VIDEO){
+    const id=subs["Videos/"+def.carpeta];
+    L.push(def.t+":");
+    if(!id){ L.push("  sin carpeta creada"); continue; }
+    try{
+      const d=await api("/listar?carpetaId="+encodeURIComponent(id));
+      const fs=d.files||[];
+      L.push("  "+fs.length+" archivo(s)");
+      fs.forEach(f=>L.push("    · "+f.name+"  ["+(f.mimeType||"sin tipo")+"]"));
+    }catch(e){ L.push("  error: "+corta(e.message)); }
+  }
+  if(subs.Videos){
+    L.push("");
+    L.push("Carpeta Videos (general):");
+    try{
+      const d=await api("/listar?carpetaId="+encodeURIComponent(subs.Videos));
+      (d.files||[]).forEach(f=>L.push("  · "+f.name+"  ["+(f.mimeType||"")+"]"));
+    }catch(e){ L.push("  error: "+corta(e.message)); }
+  }
+  const txt=L.join("\n");
+  modal(`<h3>Diagnóstico</h3><pre class="res">${esc(txt)}</pre>
+    <div class="row" style="margin-top:10px"><button class="btn ghost wide" data-copiar="${esc(txt).replace(/"/g,"&quot;")}">Copiar</button></div>`);
+}
+
 /* ══════════ AJUSTES ══════════ */
 function vistaAjustes(){
   app.innerHTML=`<div class="row" style="margin:14px 0"><button class="btn ghost" data-act="inicio">Volver</button></div>
@@ -1094,6 +1133,7 @@ function secEntrega(r){
 
   <div class="pad" style="border-top:1px solid var(--linea)">
     <button class="btn ghost wide" data-act="revisarVideos">${S.revisando?"Revisando…":"Revisar qué llegó a Drive"}</button>
+    <button class="btn ghost sm" data-act="diagnostico" style="margin-top:8px">Diagnóstico</button>
     <p class="hint">${!listas?"Las carpetas se están creando.":
       r.revisado?"Última revisión: "+new Date(r.revisado).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"}):
       "Después de subir en Drive, toca Revisar para confirmar."}</p>
@@ -1330,6 +1370,7 @@ document.addEventListener("click", async ev=>{
     case "verArchivo": S.vista="archivo"; pinta(); break;
     case "ajustes": S.vista="ajustes"; pinta(); break;
     case "revisarVideos": await revisaVideosDrive(false); break;
+    case "diagnostico": flash("Consultando Drive…",true); await diagnostico(); break;
     case "salir": {
       if(S.r){ S.r.ultimaEtapa=S.etapa; await guardaFicha(true); }
       const guardada = S.r && S.indice.some(x=>x.id===S.r.id);
