@@ -21,6 +21,7 @@
   --r:6px;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+button,a,label,summary,input,select,textarea,.chk,.tri .set button,.tira,.ficha,.gauge{touch-action:manipulation}
 html,body{margin:0;padding:0}
 body{
   background:var(--fondo); color:var(--tinta);
@@ -64,7 +65,8 @@ button{cursor:pointer}
 label.f{display:block;margin-bottom:10px}
 label.f>span{display:block;font-size:13px;color:var(--gris);margin-bottom:3px}
 input[type=text],input[type=date],input[type=number],select,textarea{
-  width:100%;padding:11px 10px;border:1px solid var(--linea);border-radius:4px;background:#FBFCF8;min-height:46px
+  width:100%;padding:11px 10px;border:1px solid var(--linea);border-radius:4px;background:#FBFCF8;min-height:46px;
+  font-size:16px;-webkit-appearance:none;appearance:none
 }
 textarea{min-height:78px;resize:vertical}
 input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid var(--oliva-cl);outline-offset:1px}
@@ -75,7 +77,7 @@ h2.tit{color:var(--oliva);text-transform:uppercase;letter-spacing:.03em}
 .items{list-style:none;margin:0;padding:0}
 .items li{border-bottom:1px solid #EDF0E5}
 .items li:last-child{border-bottom:0}
-.chk{display:flex;align-items:center;gap:11px;width:100%;background:none;border:0;padding:11px 14px;text-align:left;font-size:15.5px}
+.chk{display:flex;align-items:center;gap:11px;width:100%;background:none;border:0;padding:11px 14px;text-align:left;font-size:15.5px;-webkit-user-select:none;user-select:none}
 .chk .box{flex:0 0 24px;height:24px;border:2px solid #B4BD9E;border-radius:4px;position:relative}
 .chk[aria-pressed=true]{background:#F1F6E9}
 .chk[aria-pressed=true] .box{background:var(--ok);border-color:var(--ok)}
@@ -84,7 +86,7 @@ h2.tit{color:var(--oliva);text-transform:uppercase;letter-spacing:.03em}
 .tri{padding:9px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .tri>p{margin:0;flex:1 1 190px;font-size:15.5px}
 .tri .set{display:flex;gap:4px}
-.tri .set button{border:1px solid var(--linea);background:#FBFCF8;border-radius:4px;padding:8px 11px;font-family:"Barlow Condensed";font-weight:600;font-size:14px;color:var(--gris);min-width:46px}
+.tri .set button{-webkit-user-select:none;user-select:none;border:1px solid var(--linea);background:#FBFCF8;border-radius:4px;padding:8px 11px;font-family:"Barlow Condensed";font-weight:600;font-size:14px;color:var(--gris);min-width:46px}
 .tri .set button[aria-pressed=true][data-v=ok]{background:var(--ok);border-color:var(--ok);color:#fff}
 .tri .set button[aria-pressed=true][data-v=dano]{background:var(--dano);border-color:var(--dano);color:#fff}
 .tri textarea{margin-top:2px;flex-basis:100%;min-height:52px}
@@ -97,7 +99,7 @@ h2.tit{color:var(--oliva);text-transform:uppercase;letter-spacing:.03em}
 .slot:last-child{border-bottom:0}
 .slot h4{margin:0 0 2px;font-size:17px}
 .slot p{margin:0 0 9px;font-size:13px;color:var(--gris)}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid var(--oliva);background:var(--oliva);color:#fff;border-radius:4px;padding:11px 15px;font-family:"Barlow Condensed";font-weight:600;font-size:16px;min-height:46px}
+.btn{-webkit-user-select:none;user-select:none;display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid var(--oliva);background:var(--oliva);color:#fff;border-radius:4px;padding:11px 15px;font-family:"Barlow Condensed";font-weight:600;font-size:16px;min-height:46px}
 .btn.ghost{background:#fff;color:var(--tinta)}
 .btn.acento{background:var(--ambar);border-color:var(--ambar-osc);color:#2E2A06;
   box-shadow:0 1px 0 var(--ambar-osc)}
@@ -437,8 +439,36 @@ async function abreFicha(id){
   }
   if((S.r.ultimaEtapa||"")==="entrega") setTimeout(alistaVideos,300);
   S.etapa = (S.r.ultimaEtapa && ETAPAS.some(e=>e.k===S.r.ultimaEtapa)) ? S.r.ultimaEtapa : faseDe(S.r).etapa;
+  S.original = raw;            // copia intacta, para poder salir sin guardar
   pinta();
 }
+
+/* Devuelve la ficha a como estaba al abrirla. El autoguardado sigue activo
+   para no perder trabajo si se apaga la pantalla; esto deshace esa escritura. */
+async function descartaCambios(){
+  const r=S.r; if(!r) return;
+  const nueva = !S.indice.some(x=>x.id===r.id);
+  if(nueva){
+    await St.del("r:"+r.id);
+    S.indice = S.indice.filter(x=>x.id!==r.id);
+    await guardaIndice();
+  }else if(S.original){
+    await St.set("r:"+r.id, S.original);
+    const prev = JSON.parse(S.original);
+    const [n,t] = progTotal(prev);
+    const i = S.indice.findIndex(x=>x.id===r.id);
+    if(i>=0){
+      S.indice[i] = {...S.indice[i], patente:prev.patente, cliente:prev.cliente, fi:prev.fi, ft:prev.ft,
+                     estado:prev.estado, pct:Math.round(n/t*100), fase:faseDe(prev).k,
+                     carpeta:nombreCarpeta(prev), driveCarpeta:prev.driveCarpeta||""};
+      await guardaIndice();
+    }
+  }
+  S.original=null; S.vista="inicio"; S.r=null; pinta();
+  flash(nueva ? "Ficha descartada" : "Cambios descartados");
+}
+const hayCambios = ()=> !!(S.r && S.original && JSON.stringify({...S.r, act:0, ultimaEtapa:0})
+                            !== JSON.stringify({...JSON.parse(S.original), act:0, ultimaEtapa:0}));
 async function borraFicha(id){
   const raw=await St.get("r:"+id);
   if(raw){ const r=JSON.parse(raw);
@@ -904,11 +934,6 @@ function vistaAjustes(){
       <button class="btn ghost" id="cfgTest">Probar conexión</button></div>
     <p class="hint" id="cfgEstado">${hayDrive()?"Configurado. Las fotos, videos y documentos se suben solos.":"Sin configurar: todo queda solo en este teléfono."}</p>
   </div></div>
-  <div class="card"><h3>Carpetas de Drive</h3><div class="pad">
-    <p class="hint" style="margin:0 0 10px">Si cambiaste de cuenta, de unidad compartida o moviste la carpeta base, la app puede seguir apuntando a la ubicación anterior.</p>
-    <button class="btn ghost" id="cfgRehacer">Rehacer carpetas en Drive</button>
-    <p class="hint">Olvida las ubicaciones guardadas y las vuelve a crear donde corresponde. No borra ningún archivo.</p>
-  </div></div>
   <div class="card"><h3>Espacio en este dispositivo</h3><div class="pad">
     <p class="hint" id="espacio" style="margin:0 0 10px">Calculando…</p>
     <button class="btn ghost" id="cfgLimpiar">Liberar fotos ya respaldadas</button>
@@ -924,21 +949,6 @@ function vistaAjustes(){
     const e=document.getElementById("espacio");
     if(e) e.textContent=`${claves.length} foto(s) guardadas aquí · ${(bytes/1048576).toFixed(1)} MB. Los videos nunca se guardan en el dispositivo.`;
   })();
-  document.getElementById("cfgRehacer").onclick=async()=>{
-    CFG.raizId=""; CFG.huella=""; S.huella=""; await guardaCfg();
-    let n=0;
-    for(const res of S.indice){
-      const raw=await St.get("r:"+res.id); if(!raw) continue;
-      const r=JSON.parse(raw);
-      if(r.driveCarpeta || r.driveSubs){
-        delete r.driveCarpeta; delete r.driveSubs; delete r.driveNombre; delete r.driveVids;
-        await St.set("r:"+r.id, JSON.stringify(r)); n++;
-      }
-    }
-    if(S.r){ delete S.r.driveCarpeta; delete S.r.driveSubs; delete S.r.driveNombre; delete S.r.driveVids; }
-    flash(n ? `Listo · ${n} ficha(s) se recrearán en Drive` : "Listo · se usarán las carpetas nuevas");
-    pinta();
-  };
   document.getElementById("cfgLimpiar").onclick=async()=>{
     let n=0;
     for(const res of S.indice.filter(x=>x.estado==="cerrado")){
@@ -1110,6 +1120,7 @@ function vistaFicha(){
       Las fotos quedan solo en este teléfono y los videos se pierden al cerrar.
       <button class="btn ghost sm" data-act="ajustes" style="margin-top:8px">Conectar ahora</button></div>`}
     <div class="row" style="margin:14px 0 2px">
+      <button class="btn ghost sm" data-act="volver" aria-label="Salir sin guardar">‹ Salir</button>
       <button class="btn ghost sm" data-act="borrar" style="margin-left:auto">Eliminar arriendo</button>
     </div>`
     + secciones[S.etapa](r)
@@ -1137,7 +1148,7 @@ function secDatos(r){
       <label class="f"><span>Fecha inicio</span><input type="date" data-set="fi" value="${r.fi}"></label>
       <label class="f"><span>Fecha término</span><input type="date" data-set="ft" value="${r.ft}"></label>
     </div>
-    <p class="hint">La devolución es a más tardar a las 11:00 del día siguiente a la fecha de término.${r.ft?"":" <b>Esta fecha define cuándo se purgan los videos, así que es obligatoria para cerrar la ficha.</b>"}</p>
+    <p class="hint">La devolución es a más tardar a las 11:00 del día siguiente a la fecha de término.</p>
     <span style="display:block;font-size:13px;color:var(--gris);margin:12px 0 3px">Adicionales contratados</span>
     <details class="desplegable" ${(r.adicionales||[]).length?"":"open"}>
       <summary>Elegir adicionales <b id="adicResumen">${esc(resumenAdic(r))}</b></summary>
@@ -1427,12 +1438,23 @@ document.addEventListener("click", async ev=>{
     case "salir": {
       if(S.r){ S.r.ultimaEtapa=S.etapa; await guardaFicha(true); }
       const guardada = S.r && S.indice.some(x=>x.id===S.r.id);
-      S.vista="inicio"; S.r=null; pinta();
+      S.original=null; S.vista="inicio"; S.r=null; pinta();
       flash(guardada?"Cambios guardados":"Ficha en blanco descartada");
       break; }
+    case "volver":
+      if(pendientes()) { flash("Espera a que terminen las subidas"); break; }
+      {
+        const r=S.r||{}, guardada=S.indice.some(x=>x.id===r.id);
+        const hayQuePerder = guardada ? hayCambios() : !!(r.patente || r.cliente);
+        if(hayQuePerder)
+          confirmar("Se pierde lo que escribiste desde que abriste la ficha. Las fotos y videos que ya subieron a Drive se quedan.",
+                    descartaCambios, "Salir sin guardar");
+        else { S.original=null; S.vista="inicio"; S.r=null; pinta(); }
+      }
+      break;
     case "bajarResumen": baja(nombreCarpeta(S.r)+"_resumen.txt", textoResumen(S.r), "text/plain"); break;
     case "bajarJson": baja(nombreCarpeta(S.r)+"_ficha.json", JSON.stringify(fichaExport(S.r),null,2), "application/json"); break;
-    case "nueva": S.r=nuevaFicha(); S.vista="ficha"; S.etapa="datos"; pinta(); break;
+    case "nueva": S.r=nuevaFicha(); S.original=null; S.vista="ficha"; S.etapa="datos"; pinta(); break;
     case "inicio": {
       const enBlanco = S.r && !S.indice.some(x=>x.id===S.r.id);
       S.vista="inicio"; S.r=null; pinta();
