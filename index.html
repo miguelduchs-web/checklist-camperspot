@@ -96,6 +96,8 @@ h2.tit{color:var(--oliva);text-transform:uppercase;letter-spacing:.03em}
 
 /* ---------- media ---------- */
 .slot{padding:12px 14px;border-bottom:1px solid #EDF0E5}
+button.slot.tarea{display:block;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid #EDF0E5;border-left:4px solid var(--linea)}
+button.slot.tarea:active{background:var(--salvia-pal)}
 .slot:last-child{border-bottom:0}
 .slot h4{margin:0 0 2px;font-size:17px}
 .slot p{margin:0 0 9px;font-size:13px;color:var(--gris)}
@@ -395,6 +397,12 @@ async function bootstrap(){
   }
   S.flota = ordenaFlota(S.flota);
   await St.set("flota", JSON.stringify(S.flota));
+  await cargaFlota();
+  S.flota.forEach(v=>{
+    FLOTA.veh[v.patente] = FLOTA.veh[v.patente] ? {...v, ...FLOTA.veh[v.patente]} : {...v, act:0};
+  });
+  S.flota = listaFlota();
+  setTimeout(liberaFotosViejas, 4000);
   const ix = await St.get("indice");
   S.indice = ix ? JSON.parse(ix) : [];
   pinta();
@@ -921,6 +929,198 @@ function buscaMedia(id){
   return null;
 }
 
+
+/* ══════════ FLOTA: ESTADO COMPARTIDO ══════════
+   Vehículos y tareas viven en un solo archivo en Drive, para que los dos
+   teléfonos vean lo mismo. Se cachea local para trabajar sin señal y se
+   fusiona al guardar, de modo que dos personas trabajando a la vez no se
+   pisen: cada tarea gana según su marca de tiempo. */
+
+const TIPOS = [
+  {k:"reparacion", t:"Reparación"},
+  {k:"mantencion", t:"Mantención"},
+  {k:"permiso",    t:"Documentos"},
+  {k:"otro",       t:"Otro"},
+];
+const ESTADOS = [
+  {k:"pendiente", t:"Pendiente"},
+  {k:"curso",     t:"En curso"},
+  {k:"listo",     t:"Resuelta"},
+];
+const tTipo   = k => (TIPOS.find(x=>x.k===k)||{t:"Otro"}).t;
+const tEstado = k => (ESTADOS.find(x=>x.k===k)||{t:"Pendiente"}).t;
+
+let FLOTA = { v:1, act:0, veh:{}, tareas:[] };
+let FLOTA_SYNC = { subiendo:false, sucio:false, ultimo:0 };
+
+const listaFlota = () => ordenaFlota(Object.values(FLOTA.veh||{}));
+const tareasDe = (patente, estado) => FLOTA.tareas
+  .filter(t=>t.patente===patente && (!estado || (estado==="abiertas" ? t.estado!=="listo" : t.estado===estado)))
+  .sort((a,b)=>(b.creado||0)-(a.creado||0));
+const abiertasDe = p => FLOTA.tareas.filter(t=>t.patente===p && t.estado!=="listo").length;
+/* Un documento avisa 45 días antes de vencer, no el día después */
+const porVencer = d => { if(!d || d < hoy()) return false;
+  return (new Date(d) - new Date(hoy())) / 86400000 <= 45; };
+
+/* Fusión: las tareas se unen por id y gana la versión más reciente.
+   Así, si uno agrega y otro cierra al mismo tiempo, no se pierde ninguna. */
+function fusiona(local, remoto){
+  if(!remoto || !remoto.tareas) return local;
+  const out = { v:1, act:Math.max(local.act||0, remoto.act||0), veh:{}, tareas:[] };
+  const patentes = new Set([...Object.keys(local.veh||{}), ...Object.keys(remoto.veh||{})]);
+  for(const p of patentes){
+    const a=(local.veh||{})[p], b=(remoto.veh||{})[p];
+    if(!a){ out.veh[p]=b; continue; }
+    if(!b){ out.veh[p]=a; continue; }
+    const base = (a.act||0) >= (b.act||0) ? {...b,...a} : {...a,...b};
+    const km = Math.max(Number(a.km)||0, Number(b.km)||0);   // el millaje solo sube
+    if(km) base.km = km; else delete base.km;
+    out.veh[p]=base;
+  }
+  const mapa = new Map();
+  for(const t of [...(remoto.tareas||[]), ...(local.tareas||[])]){
+    const prev = mapa.get(t.id);
+    if(!prev || (t.act||0) >= (prev.act||0)) mapa.set(t.id, t);
+  }
+  out.tareas = [...mapa.values()];
+  return out;
+}
+
+async function cargaFlota(){
+  const raw = await St.get("flotaEstado");
+  if(raw){ try{ FLOTA = JSON.parse(raw); }catch(e){} }
+  FLOTA.veh = FLOTA.veh || {}; FLOTA.tareas = FLOTA.tareas || [];
+  await bajaFlota(true);
+}
+
+async function bajaFlota(silencioso){
+  if(!hayDrive() || !navigator.onLine) return;
+  try{
+    const d = await api("/estado");
+    if(d && d.contenido) FLOTA = fusiona(FLOTA, d.contenido);
+    FLOTA_SYNC.ultimo = Date.now();
+    await St.set("flotaEstado", JSON.stringify(FLOTA));
+    if(FLOTA_SYNC.sucio) await subeFlota();
+    if(!silencioso) flash("Flota actualizada");
+    if(S.vista==="flota"||S.vista==="vehiculo") pinta(true);
+  }catch(e){ if(!silencioso) flash("No se pudo leer la flota: "+corta(e.message)); }
+}
+
+async function guardaFlota(){
+  FLOTA.act = Date.now();
+  await St.set("flotaEstado", JSON.stringify(FLOTA));
+  FLOTA_SYNC.sucio = true;
+  clearTimeout(guardaFlota._t);
+  guardaFlota._t = setTimeout(subeFlota, 700);
+}
+
+async function subeFlota(){
+  if(!hayDrive() || !navigator.onLine || FLOTA_SYNC.subiendo) return;
+  FLOTA_SYNC.subiendo = true;
+  try{
+    const d = await api("/estado");                       // fusionar antes de escribir
+    if(d && d.contenido) FLOTA = fusiona(FLOTA, d.contenido);
+    await api("/estado", { contenido: FLOTA });
+    await St.set("flotaEstado", JSON.stringify(FLOTA));
+    FLOTA_SYNC.sucio = false; FLOTA_SYNC.ultimo = Date.now();
+  }catch(e){
+    FLOTA_SYNC.sucio = true;                              // se reintenta al volver la señal
+  }finally{ FLOTA_SYNC.subiendo = false; }
+}
+
+function nuevaTarea(patente, datos){
+  const t = { id:uid(), patente, tipo:"reparacion", titulo:"", detalle:"", estado:"pendiente",
+              fotos:[], creado:Date.now(), act:Date.now(), ...datos };
+  FLOTA.tareas.push(t);
+  guardaFlota();
+  return t;
+}
+/* Las fotos se leen del disco solo al abrir la tarea, no al entrar al vehículo:
+   un historial de años no tiene por qué cargarse entero en memoria. */
+async function cargaFotosTarea(id){
+  const t = FLOTA.tareas.find(x=>x.id===id); if(!t) return;
+  for(const f of t.fotos||[])
+    if(!FOTOS[f.id]){ const x=await St.get("f:"+f.id); if(x) FOTOS[f.id]=x; }
+}
+
+/* Una tarea resuelta cuyas fotos ya están en Drive no necesita copia local.
+   Se siguen viendo desde la ficha, abriéndolas en Drive. */
+async function liberaFotosViejas(){
+  const limite = Date.now() - 30*86400000;
+  let n = 0;
+  for(const t of FLOTA.tareas){
+    if(t.estado !== "listo" || !t.cerrado || t.cerrado > limite) continue;
+    for(const f of t.fotos||[]){
+      if(!f.driveId || f.local === false) continue;
+      await St.del("f:"+f.id); delete FOTOS[f.id];
+      f.local = false; n++;
+    }
+  }
+  if(n) await guardaFlota();
+  return n;
+}
+
+async function tocaTarea(id, cambios){
+  const t = FLOTA.tareas.find(x=>x.id===id); if(!t) return null;
+  Object.assign(t, cambios, { act:Date.now() });
+  await guardaFlota();
+  return t;
+}
+
+
+/* ══════════ PUENTE ENTRE ARRIENDOS Y FLOTA ══════════ */
+
+/* El millaje de llegada pasa a ser el millaje actual del vehículo.
+   Solo sube: un error de tipeo hacia abajo no borra el kilometraje real. */
+async function millajeAFlota(r){
+  const km = Number(r.reporte && r.reporte.km) || 0;
+  if(!km || !r.patente) return false;
+  const v = FLOTA.veh[r.patente];
+  if(!v || km <= (Number(v.km)||0)) return false;
+  v.km = km; v.kmFecha = r.ft || hoy(); v.act = Date.now();
+  S.flota = listaFlota();
+  await guardaFlota();
+  return true;
+}
+
+/* Cada daño del arriendo se convierte en una reparación pendiente.
+   La clave de origen evita duplicar si se cierra el arriendo dos veces. */
+async function danosAFlota(r){
+  if(!r.patente) return 0;
+  const yaHay = new Set(FLOTA.tareas.filter(t=>t.origen&&t.origen.clave).map(t=>t.origen.clave));
+  const arriendo = nombreCarpeta(r);
+  let n = 0;
+
+  const agrega = (clave, titulo, detalle, media) => {
+    if(yaHay.has(clave)) return;
+    nuevaTarea(r.patente, {
+      tipo:"reparacion", titulo, detalle: detalle||"",
+      origen:{ clave, fichaId:r.id, arriendo, carpetaId:r.driveCarpeta||"" },
+      fotos: (media||[]).filter(m=>m.driveId||FOTOS[m.id])
+                        .map(m=>({ id:m.id, nombre:m.nombre||"", driveId:m.driveId||"" })),
+    });
+    yaHay.add(clave); n++;
+  };
+
+  for(const h of hallazgos(r))
+    agrega(`${r.id}:${h.slot}`, h.t, h.nota, h.media);
+
+  for(const d of r.danos||[])
+    agrega(`${r.id}:dano:${d.id}`, d.zona || "Daño sin zona", d.desc, d.fotos);
+
+  return n;
+}
+
+/* Al cerrar el arriendo se traspasa todo de una vez */
+async function traspasaAFlota(r){
+  const subio = await millajeAFlota(r);
+  const nuevas = await danosAFlota(r);
+  const partes = [];
+  if(subio) partes.push("millaje actualizado");
+  if(nuevas) partes.push(`${nuevas} reparación(es) a la flota`);
+  return partes.join(" · ");
+}
+
 /* ══════════ AJUSTES ══════════ */
 function vistaAjustes(){
   app.innerHTML=`<div class="row" style="margin:14px 0"><button class="btn ghost" data-act="inicio">Volver</button></div>
@@ -947,7 +1147,10 @@ function vistaAjustes(){
     const claves=await St.list("f:");
     let bytes=0; for(const k of claves){ const v=await St.get(k); if(v) bytes+=v.length*0.75; }
     const e=document.getElementById("espacio");
-    if(e) e.textContent=`${claves.length} foto(s) guardadas aquí · ${(bytes/1048576).toFixed(1)} MB. Los videos nunca se guardan en el dispositivo.`;
+    const tareasLocal = FLOTA.tareas.reduce((a,t)=>a+(t.fotos||[]).filter(f=>f.local!==false).length,0);
+    if(e) e.textContent=`${claves.length} foto(s) guardadas aquí · ${(bytes/1048576).toFixed(1)} MB`
+      + ` · ${FLOTA.tareas.length} tarea(s) de flota, ${tareasLocal} con foto local.`
+      + ` Las fotos de tareas resueltas hace más de 30 días se liberan solas. Los videos nunca se guardan en el dispositivo.`;
   })();
   document.getElementById("cfgLimpiar").onclick=async()=>{
     let n=0;
@@ -997,6 +1200,7 @@ function pinta(keep){
   else if(S.vista==="flota") vistaFlota();
   else if(S.vista==="archivo") vistaArchivo();
   else if(S.vista==="ajustes") vistaAjustes();
+  else if(S.vista==="vehiculo") vistaVehiculo();
   else vistaFicha();
   if(keep) window.scrollTo(0,y); else window.scrollTo({top:0});
 }
@@ -1046,7 +1250,9 @@ function vistaInicio(){
     .filter(f=>!q || (f.patente||"").toLowerCase().includes(q) || (f.cliente||"").toLowerCase().includes(q));
   const abiertas=todas.filter(f=>f.estado!=="cerrado");
   const cerradas=todas.filter(f=>f.estado==="cerrado");
-  const alertas=S.flota.filter(v=>venc(v.rt)||venc(v.permiso));
+  const alertas=listaFlota().filter(v=>venc(v.rt)||venc(v.permiso));
+  const pendFlota=FLOTA.tareas.filter(t=>t.estado!=="listo").length;
+  const proximos=listaFlota().filter(v=>!venc(v.rt)&&!venc(v.permiso)&&(porVencer(v.rt)||porVencer(v.permiso)));
 
   const tarjeta=f=>`<button class="ficha" data-abre="${f.id}" data-fase="${f.fase||""}">
       <b>${esc(f.patente||"Sin patente")}</b>
@@ -1060,9 +1266,11 @@ function vistaInicio(){
       <button class="btn ghost sm" data-act="ajustes" style="margin-top:8px">Conectar</button></div>`}
     ${alertas.length?`<div class="aviso"><b>Documentos vencidos</b>
       ${alertas.map(v=>`<br>${v.patente}: ${venc(v.rt)?"revisión técnica ("+fecha(v.rt)+")":""}${venc(v.rt)&&venc(v.permiso)?" · ":""}${venc(v.permiso)?"permiso de circulación ("+fecha(v.permiso)+")":""}`).join("")}</div>`:""}
+    ${proximos.length?`<div class="aviso"><b>Documentos por vencer</b>
+      ${proximos.map(v=>`<br>${v.patente}: ${porVencer(v.rt)?"RT "+fecha(v.rt):""}${porVencer(v.rt)&&porVencer(v.permiso)?" · ":""}${porVencer(v.permiso)?"permiso "+fecha(v.permiso):""}`).join("")}</div>`:""}
     <div class="row" style="margin:14px 0 4px">
       <button class="btn acento" data-act="nueva">Nuevo arriendo</button>
-      <button class="btn ghost" data-act="verFlota">Flota</button>
+      <button class="btn ghost" data-act="verFlota">Flota${pendFlota?` · ${pendFlota}`:""}</button>
       <button class="btn ghost" data-act="verArchivo">Archivo</button>
       <button class="btn ghost" data-act="ajustes">${hayDrive()?"Drive ✓":"Drive"}</button>
     </div>
@@ -1091,21 +1299,160 @@ const venc = d => d && d < hoy();
 
 /* ---------- flota ---------- */
 function vistaFlota(){
-  app.innerHTML=`<div class="row" style="margin:14px 0"><button class="btn ghost" data-act="inicio">Volver</button>
-    <button class="btn" data-act="addVeh">Agregar vehículo</button></div>
-  <p class="hint" style="margin:0 0 10px">Cualquier patente se puede asignar a una ficha de cualquier sucursal. La base solo indica dónde queda habitualmente.</p>
-  ${S.flota.map((v,i)=>`
-    <div class="card"><h3>${esc(v.patente)}</h3><div class="pad">
-      <label class="f"><span>Sucursal base</span><select data-veh="${v.patente}" data-c="suc">${SUCURSALES.map(s=>`<option ${v.suc===s?"selected":""}>${s}</option>`).join("")}</select></label>
-      <label class="f"><span>Mantención programada</span><input type="text" data-veh="${v.patente}" data-c="mant" value="${esc(v.mant)}"></label>
-      <div class="grid">
-        <label class="f"><span>Revisión técnica vence</span><input type="date" data-veh="${v.patente}" data-c="rt" value="${v.rt}"></label>
-        <label class="f"><span>Permiso de circulación hasta</span><input type="date" data-veh="${v.patente}" data-c="permiso" value="${v.permiso}"></label>
+  const veh = listaFlota();
+  const abiertas = FLOTA.tareas.filter(t=>t.estado!=="listo").length;
+  app.innerHTML=`<div class="row" style="margin:14px 0">
+      <button class="btn ghost" data-act="inicio">Volver</button>
+      <button class="btn ghost" data-act="addVeh">Agregar vehículo</button>
+    </div>
+    <h2 class="tit" style="font-size:22px;margin:0 0 4px">Flota</h2>
+    <p class="hint" style="margin:0 0 14px">${abiertas
+      ? `${abiertas} tarea(s) abierta(s) en total.`
+      : "Sin tareas pendientes en ninguna máquina."}${FLOTA_SYNC.ultimo
+      ? ` · Sincronizado ${new Date(FLOTA_SYNC.ultimo).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})}`
+      : hayDrive()?"":" · sin conectar a Drive"}</p>
+
+  ${veh.map(v=>{
+    const ab = abiertasDe(v.patente);
+    const docs = [];
+    if(venc(v.rt)) docs.push("RT vencida");
+    else if(porVencer(v.rt)) docs.push("RT vence "+fecha(v.rt));
+    if(venc(v.permiso)) docs.push("Permiso vencido");
+    else if(porVencer(v.permiso)) docs.push("Permiso vence "+fecha(v.permiso));
+    return `<button class="ficha" data-vehabrir="${v.patente}" data-fase="${ab?"revision":"lista"}">
+      <b>${esc(v.patente)}</b>
+      <small>${esc(v.suc||"")}${v.km?` · ${Number(v.km).toLocaleString("es-CL")} millas`:""}</small>
+      <span class="m">
+        ${ab?`<span class="badge warn">${ab} pendiente${ab>1?"s":""}</span>`:`<span class="badge ok">Al día</span>`}
+        ${docs.map(d=>`<span class="badge bad">${d}</span>`).join("")}
+      </span></button>`;
+  }).join("")}`;
+}
+
+function vistaVehiculo(){
+  const v = FLOTA.veh[S.veh];
+  if(!v){ S.vista="flota"; return vistaFlota(); }
+  const abiertas = tareasDe(v.patente,"abiertas");
+  const cerradas = tareasDe(v.patente,"listo");
+  const arriendos = S.indice.filter(f=>f.patente===v.patente)
+    .sort((a,b)=>(b.ft||"").localeCompare(a.ft||"")).slice(0,8);
+
+  app.innerHTML=`<div class="row" style="margin:14px 0">
+      <button class="btn ghost sm" data-act="verFlota">‹ Flota</button>
+      <button class="btn acento sm" data-act="addTarea" style="margin-left:auto">Agregar tarea</button>
+    </div>
+    <h2 class="tit" style="font-size:26px;margin:0 0 2px">${esc(v.patente)}</h2>
+    <p class="hint" style="margin:0 0 14px">${esc(v.suc||"")}${v.km
+      ? ` · ${Number(v.km).toLocaleString("es-CL")} millas${v.kmFecha?" al "+fecha(v.kmFecha):""}`
+      : " · sin millaje registrado"}</p>
+
+  <div class="card"><h3>Por hacer <em>${abiertas.length}</em></h3>
+    ${abiertas.length ? abiertas.map(tareaFila).join("")
+      : `<div class="pad"><p class="hint" style="margin:0">Nada pendiente en esta máquina.</p></div>`}
+  </div>
+
+  <div class="card"><h3>Datos del vehículo</h3><div class="pad">
+    <div class="grid">
+      <label class="f"><span>Sucursal base</span><select data-veh="${v.patente}" data-c="suc">
+        ${SUCURSALES.map(x=>`<option ${v.suc===x?"selected":""}>${x}</option>`).join("")}</select></label>
+      <label class="f"><span>Millaje actual</span><input type="number" inputmode="numeric" data-veh="${v.patente}" data-c="km" value="${esc(v.km||"")}" placeholder="Ej: 189603"></label>
+    </div>
+    <div class="grid">
+      <label class="f"><span>Próxima mantención (millas)</span><input type="number" inputmode="numeric" data-veh="${v.patente}" data-c="kmMant" value="${esc(v.kmMant||"")}" placeholder="Ej: 195000"></label>
+      <label class="f"><span>Faltan</span><input type="text" readonly style="background:#EAEEE0" value="${
+        v.kmMant&&v.km ? Math.max(0, v.kmMant-v.km).toLocaleString("es-CL")+" millas" : "—"}"></label>
+    </div>
+    <div class="grid">
+      <label class="f"><span>Revisión técnica vence</span><input type="date" data-veh="${v.patente}" data-c="rt" value="${v.rt||""}"></label>
+      <label class="f"><span>Permiso de circulación hasta</span><input type="date" data-veh="${v.patente}" data-c="permiso" value="${v.permiso||""}"></label>
+    </div>
+    <div class="row">
+      <span class="badge ${venc(v.rt)?"bad":porVencer(v.rt)?"warn":"ok"}">RT ${venc(v.rt)?"vencida":porVencer(v.rt)?"por vencer":"vigente"}</span>
+      <span class="badge ${venc(v.permiso)?"bad":porVencer(v.permiso)?"warn":"ok"}">Permiso ${venc(v.permiso)?"vencido":porVencer(v.permiso)?"por vencer":"vigente"}</span>
+      <button class="btn ghost sm" data-delveh="${v.patente}" style="margin-left:auto">Eliminar vehículo</button>
+    </div>
+  </div></div>
+
+  <div class="card"><h3>Historial <em>${cerradas.length}</em></h3>
+    ${cerradas.length ? cerradas.slice(0, S.verHist||10).map(tareaFila).join("")
+      : `<div class="pad"><p class="hint" style="margin:0">Todavía no hay tareas resueltas.</p></div>`}
+    ${cerradas.length > (S.verHist||10)
+      ? `<div class="pad"><button class="btn ghost wide" data-act="masHist">Ver ${Math.min(20, cerradas.length-(S.verHist||10))} más</button></div>`
+      : ""}
+  </div>
+
+  ${arriendos.length?`<div class="card"><h3>Últimos arriendos <em>${arriendos.length}</em></h3>
+    <ul class="arch" style="padding:6px 14px">
+      ${arriendos.map(f=>`<li style="padding:9px 0">
+        <code>${fecha(f.fi)} → ${fecha(f.ft)}</code>
+        <small>${esc(f.cliente||"sin cliente")} · ${f.estado==="cerrado"?"cerrado":"en curso"}</small>
+      </li>`).join("")}
+    </ul></div>`:""}`;
+}
+
+const diaDe = ms => fecha(new Date(ms).toISOString().slice(0,10));
+
+function tareaFila(t){
+  const orig = t.origen && t.origen.arriendo;
+  return `<button class="slot tarea" data-tarea="${t.id}">
+    <div class="row" style="align-items:flex-start;gap:8px">
+      <div style="flex:1;min-width:0">
+        <h4 style="margin:0">${esc(t.titulo||"(sin título)")}</h4>
+        <p style="margin:2px 0 0">${tTipo(t.tipo)}${t.detalle?" · "+esc(t.detalle.slice(0,70))+(t.detalle.length>70?"…":""):""}</p>
+        ${orig?`<p style="margin:3px 0 0"><span class="badge">Del arriendo ${esc(orig)}</span></p>`:""}
       </div>
-      <div class="row"><span class="badge ${venc(v.rt)?"bad":"ok"}">RT ${venc(v.rt)?"vencida":"vigente"}</span>
-      <span class="badge ${venc(v.permiso)?"bad":"ok"}">Permiso ${venc(v.permiso)?"vencido":"vigente"}</span>
-      <button class="btn ghost sm" data-delveh="${v.patente}" style="margin-left:auto">Eliminar</button></div>
-    </div></div>`).join("")}`;
+      <span class="badge ${t.estado==="listo"?"ok":t.estado==="curso"?"warn":"bad"}">${tEstado(t.estado)}</span>
+    </div>
+    <p style="margin:6px 0 0">${(t.fotos||[]).length?`${t.fotos.length} foto(s) · `:""}${
+      t.estado==="listo"&&t.cerrado ? "Resuelta "+diaDe(t.cerrado) : "Abierta "+diaDe(t.creado)}</p>
+  </button>`;
+}
+
+/* El detalle va en ventana para no perder de vista la lista de tareas */
+function modalTarea(id){
+  const t = FLOTA.tareas.find(x=>x.id===id); if(!t) return;
+  S.tarea = id;
+  const fotos = (t.fotos||[]).map(f=>{
+    if(FOTOS[f.id]) return `<div class="tira"><img src="${FOTOS[f.id]}" alt="">
+      <button data-taredel="${f.id}" aria-label="Quitar">×</button></div>`;
+    if(f.driveId) return `<a class="tira" href="https://drive.google.com/file/d/${f.driveId}/view"
+      target="_blank" rel="noopener"><em class="txt">Ver en<br>Drive</em></a>`;
+    return `<div class="tira"><em class="txt">Foto no<br>disponible</em>
+      <button data-taredel="${f.id}" aria-label="Quitar">×</button></div>`;
+  }).join("");
+
+  modal(`<h3>Tarea · ${esc(t.patente)}</h3>
+    <label class="f"><span>Qué hay que hacer</span><input type="text" data-tarc="titulo" value="${esc(t.titulo)}" placeholder="Ej: cambiar sello de escotilla"></label>
+    <div class="grid">
+      <label class="f"><span>Tipo</span><select data-tarc="tipo">
+        ${TIPOS.map(x=>`<option value="${x.k}" ${t.tipo===x.k?"selected":""}>${x.t}</option>`).join("")}</select></label>
+      <label class="f"><span>Estado</span><select data-tarc="estado">
+        ${ESTADOS.map(x=>`<option value="${x.k}" ${t.estado===x.k?"selected":""}>${x.t}</option>`).join("")}</select></label>
+    </div>
+    <label class="f"><span>Detalle</span><textarea data-tarc="detalle" placeholder="Qué se observó, qué repuesto hace falta…">${esc(t.detalle)}</textarea></label>
+    ${t.origen&&t.origen.arriendo?`<p class="hint">Viene del arriendo <b>${esc(t.origen.arriendo)}</b>${
+      t.origen.carpetaId?` · <a href="${linkCarpeta(t.origen.carpetaId)}" target="_blank" rel="noopener">abrir carpeta</a>`:""}</p>`:""}
+
+    <span style="display:block;font-size:13px;color:var(--gris);margin:12px 0 5px">Respaldo</span>
+    <div class="row">
+      <button class="btn ghost sm" data-tarfoto="1" data-cam="1">Tomar foto</button>
+      <button class="btn ghost sm" data-tarfoto="1">Adjuntar</button>
+    </div>
+    <div class="tiras">${fotos}</div>
+
+    ${t.estado==="listo"?`
+      <label class="f" style="margin-top:12px"><span>Cómo se resolvió</span>
+        <textarea data-tarc="notaCierre" placeholder="Qué se hizo, dónde, con qué repuesto">${esc(t.notaCierre||"")}</textarea></label>
+      <label class="f"><span>Costo (opcional)</span>
+        <input type="number" inputmode="numeric" data-tarc="costo" value="${esc(t.costo||"")}" placeholder="$"></label>
+      <p class="hint">Resuelta el ${t.cerrado?diaDe(t.cerrado):"—"}</p>`:""}
+
+    <div class="row" style="margin-top:14px">
+      ${t.estado!=="listo"
+        ? `<button class="btn acento" data-act="cerrarTarea" style="flex:1">Marcar resuelta</button>`
+        : `<button class="btn ghost" data-act="reabrirTarea" style="flex:1">Reabrir</button>`}
+      <button class="btn ghost" data-act="borrarTarea">Eliminar</button>
+    </div>`);
 }
 
 /* ---------- ficha ---------- */
@@ -1328,6 +1675,19 @@ function secReporte(r){
     <label class="f"><span>Comentario final</span><textarea data-set="reporte.nota" placeholder="Qué queda pendiente para el próximo arriendo">${esc(r.reporte.nota)}</textarea></label>
     <button class="btn wide" data-act="resumen" style="margin-top:6px">Ver resumen del arriendo</button>
   </div></div>
+
+  ${r.patente?`<div class="card"><h3>Qué pasa al cerrar</h3><div class="pad">
+    ${(()=>{ const v=FLOTA.veh[r.patente]||{}, km=Number(r.reporte.km)||0, sube=km>(Number(v.km)||0);
+      const pend=hs.length+r.danos.length;
+      return `<ul class="arch" style="margin:0">
+        <li style="padding:6px 0">${sube
+          ? `<code>${esc(r.patente)}</code> <small>millaje actual pasa de ${(Number(v.km)||0).toLocaleString("es-CL")} a ${km.toLocaleString("es-CL")}</small>`
+          : `<code>${esc(r.patente)}</code> <small>${km?"el millaje del vehículo ya es mayor, no se toca":"sin millaje de llegada, el vehículo no cambia"}</small>`}</li>
+        <li style="padding:6px 0">${pend
+          ? `<code>${pend} reparación(es)</code> <small>se agregan como pendientes en la flota</small>`
+          : `<code>Sin daños</code> <small>no se crea ninguna tarea</small>`}</li>
+      </ul>`; })()}
+  </div></div>`:""}
   ${cardArchivo(r)}`;
 }
 
@@ -1415,6 +1775,13 @@ document.addEventListener("click", async ev=>{
   if(d.abre){ await abreFicha(d.abre); return; }
   if(d.chk!=null){ S.r.prep[d.chk]=!S.r.prep[d.chk];
     t.setAttribute("aria-pressed",!!S.r.prep[d.chk]); pintaRail(); pintaPie(); guardaFicha(); return; }
+  if(d.vehabrir){ S.veh=d.vehabrir; S.verHist=10; S.vista="vehiculo"; pinta(); bajaFlota(true); return; }
+  if(d.tarea){ await cargaFotosTarea(d.tarea); modalTarea(d.tarea); return; }
+  if(d.tarfoto){ pedirFotoTarea(d.cam); return; }
+  if(d.taredel){ const t=FLOTA.tareas.find(x=>x.id===S.tarea);
+    if(t){ t.fotos=(t.fotos||[]).filter(f=>f.id!==d.taredel);
+           await quitaArchivo(d.taredel); await tocaTarea(t.id,{fotos:t.fotos}); modalTarea(t.id); }
+    return; }
   if(d.adic){
     const v=d.adic; let a=(S.r.adicionales||[]).slice();
     if(v==="Ninguno") a = a.includes("Ninguno") ? [] : ["Ninguno"];
@@ -1428,13 +1795,31 @@ document.addEventListener("click", async ev=>{
   if(d.ver){ verMedia(d.ver, d.slot, d.dano||null); return; }
   if(d.add){ pedirArchivo(d.add, d.tipo, d.cam, d.dano||null); return; }
   if(d.deldano){ confirmar("¿Quitar este daño y sus respaldos?", async()=>{ for(const m of (S.r.danos.find(x=>x.id===d.deldano)||{}).fotos||[]) await quitaArchivo(m.id); S.r.danos=S.r.danos.filter(x=>x.id!==d.deldano); await guardaFicha(); pinta(true); }); return; }
-  if(d.delveh){ confirmar(`¿Eliminar ${d.delveh} de la flota?`, async()=>{ S.flota=S.flota.filter(v=>v.patente!==d.delveh); await St.set("flota",JSON.stringify(S.flota)); pinta(true); }, "Eliminar"); return; }
+  if(d.delveh){ confirmar(`¿Eliminar ${d.delveh} de la flota? Sus tareas también se eliminan.`, async()=>{
+      delete FLOTA.veh[d.delveh];
+      FLOTA.tareas = FLOTA.tareas.filter(t=>t.patente!==d.delveh);
+      S.flota = listaFlota(); await guardaFlota();
+      S.vista="flota"; pinta();
+    }, "Eliminar"); return; }
 
   if(d.copiar){ copiar(d.copiar, "Ruta copiada"); return; }
 
   switch(d.act){
     case "verArchivo": S.vista="archivo"; pinta(); break;
     case "ajustes": S.vista="ajustes"; pinta(); break;
+    case "masHist": S.verHist=(S.verHist||10)+20; pinta(true); break;
+    case "addTarea": { const t=nuevaTarea(S.veh,{}); pinta(true); modalTarea(t.id); break; }
+    case "cerrarTarea": await tocaTarea(S.tarea,{estado:"listo", cerrado:Date.now()});
+      cierraModal(); pinta(true); flash("Tarea resuelta"); break;
+    case "reabrirTarea": await tocaTarea(S.tarea,{estado:"pendiente", cerrado:0});
+      cierraModal(); pinta(true); flash("Tarea reabierta"); break;
+    case "borrarTarea": { const id=S.tarea;
+      confirmar("Se elimina la tarea y su respaldo. No se puede deshacer.", async()=>{
+        const t=FLOTA.tareas.find(x=>x.id===id);
+        for(const f of (t&&t.fotos)||[]) await quitaArchivo(f.id);
+        FLOTA.tareas = FLOTA.tareas.filter(x=>x.id!==id);
+        await guardaFlota(); cierraModal(); pinta(true); flash("Tarea eliminada");
+      }, "Eliminar"); break; }
     case "salir": {
       if(S.r){ S.r.ultimaEtapa=S.etapa; await guardaFicha(true); }
       const guardada = S.r && S.indice.some(x=>x.id===S.r.id);
@@ -1475,10 +1860,11 @@ document.addEventListener("click", async ev=>{
       if(cerrando){
         if(pendientes()){ flash("Espera a que terminen las subidas"); S.r.estado="borrador"; break; }
         const ficha=S.r;
+        const aFlota = await traspasaAFlota(ficha);
         if(hayDrive()){ flash("Subiendo documentos…",true);
-          try{ await subeDocumentos(ficha); flash("Ficha cerrada y respaldada"); }
-          catch(e){ flash("Ficha cerrada, pero falló el respaldo: "+e.message); } }
-        else flash("Ficha cerrada");
+          try{ await subeDocumentos(ficha); flash("Arriendo cerrado" + (aFlota?" · "+aFlota:"")); }
+          catch(e){ flash("Arriendo cerrado, pero falló el respaldo: "+e.message); } }
+        else flash("Arriendo cerrado" + (aFlota?" · "+aFlota:""));
         S.vista="inicio"; S.r=null; pinta();
       } else pinta(true); break; }
     case "addVeh": modalVehiculo(); break;
@@ -1494,8 +1880,18 @@ document.addEventListener("click", async ev=>{
 let tmr;
 document.addEventListener("input", ev=>{
   const el=ev.target, d=el.dataset;
-  if(d.veh){ const v=S.flota.find(x=>x.patente===d.veh); if(v){ v[d.c]=el.value; clearTimeout(tmr);
-    tmr=setTimeout(()=>St.set("flota",JSON.stringify(S.flota)),400);} return; }
+  if(d.veh){ const v=FLOTA.veh[d.veh]; if(v){
+      v[d.c] = (d.c==="km"||d.c==="kmMant") ? (Number(el.value)||0) : el.value;
+      if(d.c==="km") v.kmFecha = hoy();
+      v.act = Date.now(); S.flota = listaFlota();
+      clearTimeout(tmr); tmr=setTimeout(guardaFlota, 500);
+    } return; }
+  if(d.tarc){ const t=FLOTA.tareas.find(x=>x.id===S.tarea); if(t){
+      t[d.tarc] = d.tarc==="costo" ? (Number(el.value)||0) : el.value;
+      if(d.tarc==="estado" && el.value==="listo" && !t.cerrado) t.cerrado=Date.now();
+      if(d.tarc==="estado" && el.value!=="listo") t.cerrado=0;
+      t.act=Date.now(); clearTimeout(tmr); tmr=setTimeout(guardaFlota, 500);
+    } return; }
   if(d.dano){ const x=S.r.danos.find(y=>y.id===d.dano); if(x){ x[d.c]=el.value; deb(); } return; }
   if(d.set){ const ruta=d.set.split("."); let o=S.r;
     for(let i=0;i<ruta.length-1;i++) o=o[ruta[i]];
@@ -1506,9 +1902,50 @@ document.addEventListener("input", ev=>{
 function deb(){ clearTimeout(tmr); tmr=setTimeout(guardaFicha,600); }
 document.addEventListener("blur", e=>{ if(S.r && e.target.dataset && (e.target.dataset.set||e.target.dataset.dano)){ clearTimeout(tmr); guardaFicha(); } }, true);
 document.addEventListener("visibilitychange", ()=>{
-  if(document.hidden){ if(S.r){ clearTimeout(tmr); guardaFicha(); } return; }
+  if(document.hidden){ if(S.r){ clearTimeout(tmr); guardaFicha(); } if(FLOTA_SYNC.sucio) subeFlota(); return; }
   if(S.r && S.vista==="ficha" && S.etapa==="entrega") revisaVideosDrive(true);
 });
+
+function pedirFotoTarea(cam){
+  const inp=document.createElement("input");
+  inp.type="file"; inp.multiple=true; inp.accept="image/*";
+  if(cam) inp.setAttribute("capture","environment");
+  inp.onchange=async()=>{
+    const t=FLOTA.tareas.find(x=>x.id===S.tarea); if(!t) return;
+    for(const file of [...inp.files]){
+      const id=uid();
+      let data; try{ data=await comprime(file); }catch(e){ flash("No se pudo leer la imagen"); continue; }
+      FOTOS[id]=data; await St.set("f:"+id, data);
+      t.fotos=(t.fotos||[]).concat([{id, nombre:file.name}]);
+      subeFotoTarea(t, id, file.name);
+    }
+    await tocaTarea(t.id,{fotos:t.fotos});
+    modalTarea(t.id);
+  };
+  inp.click();
+}
+
+/* Las fotos de flota van a Fichas Camperspot/_Flota/<patente>/ */
+async function subeFotoTarea(t, fotoId, nombre){
+  if(!hayDrive()) return;
+  try{
+    const raizId = await carpetaRaiz();
+    const { carpetaId:flotaId } = await api("/carpeta", { ruta:["_Flota"], padreId:raizId });
+    const { carpetaId } = await api("/carpeta", { ruta:[t.patente], padreId:flotaId });
+    const blob = await (await fetch(FOTOS[fotoId])).blob();
+    const ext = EXT(nombre) || "jpg";
+    const { subidaUrl } = await api("/sesion", {
+      carpetaId, nombre:`${slug(t.titulo||"tarea")}-${fotoId}.${ext}`,
+      mime: blob.type||"image/jpeg", tamano: blob.size });
+    const res = await fetch(subidaUrl, { method:"PUT",
+      headers:{ "Content-Range":`bytes 0-${blob.size-1}/${blob.size}` }, body:blob });
+    if(res.ok){
+      const d = await res.json().catch(()=>({}));
+      const f = (t.fotos||[]).find(x=>x.id===fotoId);
+      if(f){ f.driveId = d.id||""; await tocaTarea(t.id,{fotos:t.fotos}); }
+    }
+  }catch(e){ /* queda local; se reintenta al volver a abrir la tarea */ }
+}
 
 function pedirArchivo(slot,tipo,cam,danoId){
   const inp=document.createElement("input");
@@ -1536,10 +1973,10 @@ function modalVehiculo(){
   document.getElementById("nvOk").onclick=async()=>{
     const pat=i.value.toUpperCase().trim();
     if(!pat) return flash("Escribe la patente");
-    if(S.flota.some(v=>v.patente===pat)) return flash("Esa patente ya existe");
-    S.flota.push({patente:pat,suc:document.getElementById("nvSuc").value,mant:"",rt:"",permiso:""});
-    S.flota=ordenaFlota(S.flota);
-    await St.set("flota",JSON.stringify(S.flota)); cierraModal(); pinta(); flash(pat+" agregada");
+    if(FLOTA.veh[pat]) return flash("Esa patente ya existe");
+    FLOTA.veh[pat] = {patente:pat, suc:document.getElementById("nvSuc").value, rt:"", permiso:"", act:Date.now()};
+    S.flota = listaFlota(); await guardaFlota();
+    cierraModal(); pinta(); flash(pat+" agregada");
   };
 }
 function modal(html){
@@ -1659,6 +2096,7 @@ window.addEventListener("online", ()=>{
   pintaConexion(); flash("Conexión recuperada");
   COLA.forEach(t=>{ t.tomado=false; });
   procesaCola();
+  bajaFlota(true);
   if(S.r && S.etapa==="entrega") revisaVideosDrive(true);
 });
 window.addEventListener("offline", ()=>{ pintaConexion(); flash("Sin conexión · se guarda en el teléfono"); });
