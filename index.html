@@ -533,7 +533,7 @@ async function quitaMedia(slot,id,danoId){
 
 
 /* ══════════ CONEXIÓN CON GOOGLE DRIVE ══════════ */
-let CFG = { url:"https://drive-camperspot.miguelduchs.workers.dev", clave:"", raizId:"" };
+let CFG = { url:"https://drive-camperspot.miguelduchs.workers.dev", clave:"", raizId:"", raizNombre:"" };
 const hayDrive = ()=> !!(CFG.url && CFG.clave);
 const corta = t => { t=String(t||"").replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim();
   return t.length>180 ? t.slice(0,180)+"…" : t; };
@@ -685,6 +685,7 @@ async function subeArchivo(t){
 }
 
 async function carpetaRaiz(){
+  if(CFG.raizNombre !== RAIZ){ CFG.raizId=""; CFG.raizNombre=RAIZ; await guardaCfg(); }
   if(CFG.raizId) return CFG.raizId;
   const { carpetaId } = await api("/carpeta", { ruta:[RAIZ] });
   CFG.raizId = carpetaId; await guardaCfg();
@@ -886,6 +887,11 @@ function vistaAjustes(){
       <button class="btn ghost" id="cfgTest">Probar conexión</button></div>
     <p class="hint" id="cfgEstado">${hayDrive()?"Configurado. Las fotos, videos y documentos se suben solos.":"Sin configurar: todo queda solo en este teléfono."}</p>
   </div></div>
+  <div class="card"><h3>Carpetas de Drive</h3><div class="pad">
+    <p class="hint" style="margin:0 0 10px">Si cambiaste de cuenta, de unidad compartida o moviste la carpeta base, la app puede seguir apuntando a la ubicación anterior.</p>
+    <button class="btn ghost" id="cfgRehacer">Rehacer carpetas en Drive</button>
+    <p class="hint">Olvida las ubicaciones guardadas y las vuelve a crear donde corresponde. No borra ningún archivo.</p>
+  </div></div>
   <div class="card"><h3>Espacio en este dispositivo</h3><div class="pad">
     <p class="hint" id="espacio" style="margin:0 0 10px">Calculando…</p>
     <button class="btn ghost" id="cfgLimpiar">Liberar fotos ya respaldadas</button>
@@ -901,6 +907,21 @@ function vistaAjustes(){
     const e=document.getElementById("espacio");
     if(e) e.textContent=`${claves.length} foto(s) guardadas aquí · ${(bytes/1048576).toFixed(1)} MB. Los videos nunca se guardan en el dispositivo.`;
   })();
+  document.getElementById("cfgRehacer").onclick=async()=>{
+    CFG.raizId=""; CFG.raizNombre=RAIZ; await guardaCfg();
+    let n=0;
+    for(const res of S.indice){
+      const raw=await St.get("r:"+res.id); if(!raw) continue;
+      const r=JSON.parse(raw);
+      if(r.driveCarpeta || r.driveSubs){
+        delete r.driveCarpeta; delete r.driveSubs; delete r.driveNombre; delete r.driveVids;
+        await St.set("r:"+r.id, JSON.stringify(r)); n++;
+      }
+    }
+    if(S.r){ delete S.r.driveCarpeta; delete S.r.driveSubs; delete S.r.driveNombre; delete S.r.driveVids; }
+    flash(n ? `Listo · ${n} ficha(s) se recrearán en Drive` : "Listo · se usarán las carpetas nuevas");
+    pinta();
+  };
   document.getElementById("cfgLimpiar").onclick=async()=>{
     let n=0;
     for(const res of S.indice.filter(x=>x.estado==="cerrado")){
@@ -1108,7 +1129,8 @@ function secDatos(r){
     </details>
     <label class="f"><span>Observaciones</span><textarea data-set="obs" placeholder="Opcional">${esc(r.obs)}</textarea></label>
     ${hayDrive() ? (r.driveCarpeta
-      ? `<p class="hint"><span class="badge ok">Carpeta lista en Drive</span> ${esc(r.driveNombre||nombreCarpeta(r))}</p>`
+      ? `<p class="hint"><span class="badge ok">Carpeta lista</span>
+          <a href="${linkCarpeta(r.driveCarpeta)}" target="_blank" rel="noopener">${esc(r.driveNombre||nombreCarpeta(r))}</a></p>`
       : datosListos(r)
         ? `<p class="hint"><span class="badge warn">Creando carpeta en Drive…</span></p>`
         : `<p class="hint">La carpeta de Drive se crea sola al completar patente, cliente y fechas.</p>`) : ""}
@@ -1197,7 +1219,7 @@ function secRevision(r){
 }
 
 /* ══════════ RUTAS Y NOMBRES DE ARCHIVO ══════════ */
-const RAIZ = "Camperspot";
+const RAIZ = "Fichas Camperspot";
 function slug(s){
   return String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"")
     .replace(/[^A-Za-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,32) || "sin-dato";
