@@ -34,8 +34,11 @@ button{cursor:pointer}
 .wrap{max-width:820px;margin:0 auto;padding:0 14px 170px}
 
 /* ---------- barra superior ---------- */
-.top{background:var(--oliva);color:#fff;position:sticky;top:0;z-index:40;box-shadow:0 1px 0 rgba(0,0,0,.18)}
-.top-in{max-width:820px;margin:0 auto;padding:9px 14px;display:flex;align-items:center;gap:10px}
+.top{background:var(--oliva);color:#fff;position:sticky;top:0;z-index:40;box-shadow:0 1px 0 rgba(0,0,0,.18);
+  padding-top:env(safe-area-inset-top)}
+body{overscroll-behavior-y:contain}
+.top-in{max-width:820px;margin:0 auto;display:flex;align-items:center;gap:10px;
+  padding:9px calc(14px + env(safe-area-inset-right)) 9px calc(14px + env(safe-area-inset-left))}
 .logo{width:36px;height:36px;border-radius:5px;display:block;flex:0 0 36px}
 .marca{font-family:"Barlow Condensed";font-size:21px;font-weight:700;line-height:1;letter-spacing:.02em;text-transform:uppercase}
 .marca span{display:block;font-size:11px;font-weight:500;color:var(--salvia-cl);letter-spacing:.14em;font-family:"Barlow"}
@@ -45,7 +48,8 @@ button{cursor:pointer}
 
 /* ---------- medidor de etapas ---------- */
 .rail{background:var(--oliva-osc);padding:9px 14px 11px;border-bottom:2px solid var(--salvia)}
-.rail-in{max-width:820px;margin:0 auto;display:flex;gap:5px}
+.rail-in{max-width:820px;margin:0 auto;display:flex;gap:5px;
+  padding:0 env(safe-area-inset-right) 0 env(safe-area-inset-left)}
 .gauge{flex:1;background:none;border:0;padding:0;text-align:left}
 .gauge b{display:block;font-family:"Barlow Condensed";font-size:14px;font-weight:600;color:#A9BC8C;line-height:1.2}
 .gauge[aria-current=true] b{color:var(--ambar)}
@@ -152,7 +156,8 @@ section.bloque h2.tit{font-size:20px;margin:0 0 2px;display:flex;align-items:cen
 
 /* ---------- pie fijo ---------- */
 .pie{position:fixed;left:0;right:0;bottom:0;background:rgba(38,56,11,.97);padding:7px 12px calc(7px + env(safe-area-inset-bottom));z-index:45}
-.pie-in{max-width:820px;margin:0 auto;display:flex;gap:7px;align-items:center;flex-wrap:nowrap}
+.pie-in{max-width:820px;margin:0 auto;display:flex;gap:7px;align-items:center;flex-wrap:nowrap;
+  padding:0 env(safe-area-inset-right) 0 env(safe-area-inset-left)}
 .pie .nav{flex:0 0 36px;height:38px;border:1px solid #4C6317;background:#1F2E06;color:#fff;
   border-radius:4px;font-size:24px;line-height:1;padding:0;font-family:"Barlow Condensed"}
 .pie .nav[disabled]{opacity:.3}
@@ -185,6 +190,9 @@ ul.arch small{color:var(--gris);display:block}
 ul.arch li.vacia{color:var(--gris);font-style:italic}
 .sub{padding:9px 14px 4px;border-top:1px solid var(--linea);background:#F7F9F1;font-family:"Barlow Condensed";font-weight:600;font-size:15px;color:var(--gris)}
 .desplegable{border:1px solid var(--linea);border-radius:4px;background:#FBFCF8;margin-bottom:10px}
+.aviso-doc{background:#F6EBD3;border-color:#E0C692;margin-top:12px}
+.aviso-doc>summary{color:#6B4A08;font-size:14px}
+.aviso-doc>summary b{color:#6B4A08;margin-left:0}
 .desplegable>summary{list-style:none;cursor:pointer;padding:12px 10px;min-height:46px;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--gris)}
 .desplegable>summary::-webkit-details-marker{display:none}
 .desplegable>summary b{margin-left:auto;text-align:right;font-family:"Barlow";font-weight:500;font-size:14px;color:var(--tinta)}
@@ -1068,6 +1076,29 @@ async function tocaTarea(id, cambios){
 }
 
 
+/* Lo que conviene revisar antes de cerrar. No bloquea salvo la fecha de
+   término, de la que depende el nombre de la carpeta y la purga de videos. */
+function faltantes(r){
+  const out = [];
+  if(!r.patente) out.push({bloquea:true, etapa:"datos", t:"Falta elegir la patente"});
+  if(!r.cliente) out.push({bloquea:false, etapa:"datos", t:"Falta el nombre del cliente"});
+  const[np,tp] = prog(r,"prep");
+  if(np < tp) out.push({bloquea:false, etapa:"prep", t:`Preparación incompleta (${np} de ${tp})`});
+  const faltanVid = SLOTS_VIDEO.filter(def=>!videosDe(r,def.k).length).map(def=>def.t);
+  if(faltanVid.length) out.push({bloquea:false, etapa:"entrega", t:"Sin video de "+faltanVid.join(", ")});
+  if(!r.entrega.km) out.push({bloquea:false, etapa:"entrega", t:"Falta el millaje de salida"});
+  if(!(r.media.f_tab_s||[]).length) out.push({bloquea:false, etapa:"entrega", t:"Falta la foto del tablero de salida"});
+  const revTot = REV_GRUPOS.reduce((a,g)=>a+itemsRev(g,r).length,0);
+  const revHechos = REV_GRUPOS.reduce((a,g)=>a+itemsRev(g,r).filter(x=>r.rev[x.k]).length,0);
+  if(revHechos < revTot) out.push({bloquea:false, etapa:"revision", t:`Revisión incompleta (${revHechos} de ${revTot})`});
+  if(!r.reporte.km) out.push({bloquea:false, etapa:"reporte", t:"Falta el millaje de llegada"});
+  const salida = Number(r.entrega.km)||0, llegada = Number(r.reporte.km)||0;
+  if(salida && llegada && llegada < salida)
+    out.push({bloquea:false, etapa:"reporte", t:"El millaje de llegada es menor que el de salida"});
+  if(!r.reporte.bencina) out.push({bloquea:false, etapa:"reporte", t:"Falta el estado de bencina"});
+  return out;
+}
+
 /* ══════════ PUENTE ENTRE ARRIENDOS Y FLOTA ══════════ */
 
 /* El millaje de llegada pasa a ser el millaje actual del vehículo.
@@ -1264,10 +1295,14 @@ function vistaInicio(){
     ${SIN_DISCO?`<div class="aviso"><b>Sin almacenamiento.</b><br>Los datos de esta sesión no se guardarán.</div>`:""}
     ${hayDrive()?"":`<div class="aviso"><b>Drive sin conectar.</b><br>Las fotos quedan solo en este dispositivo.
       <button class="btn ghost sm" data-act="ajustes" style="margin-top:8px">Conectar</button></div>`}
-    ${alertas.length?`<div class="aviso"><b>Documentos vencidos</b>
-      ${alertas.map(v=>`<br>${v.patente}: ${venc(v.rt)?"revisión técnica ("+fecha(v.rt)+")":""}${venc(v.rt)&&venc(v.permiso)?" · ":""}${venc(v.permiso)?"permiso de circulación ("+fecha(v.permiso)+")":""}`).join("")}</div>`:""}
-    ${proximos.length?`<div class="aviso"><b>Documentos por vencer</b>
-      ${proximos.map(v=>`<br>${v.patente}: ${porVencer(v.rt)?"RT "+fecha(v.rt):""}${porVencer(v.rt)&&porVencer(v.permiso)?" · ":""}${porVencer(v.permiso)?"permiso "+fecha(v.permiso):""}`).join("")}</div>`:""}
+    ${(alertas.length||proximos.length)?`<details class="desplegable aviso-doc">
+      <summary>${alertas.length?`<b>${alertas.length} máquina(s) con documentos vencidos</b>`:""}${
+        alertas.length&&proximos.length?" · ":""}${proximos.length?`${proximos.length} por vencer`:""}</summary>
+      <div class="pad">
+        ${alertas.map(v=>`<p style="margin:0 0 4px"><b>${v.patente}</b> ${venc(v.rt)?"RT vencida ("+fecha(v.rt)+")":""}${venc(v.rt)&&venc(v.permiso)?" · ":""}${venc(v.permiso)?"permiso vencido ("+fecha(v.permiso)+")":""}</p>`).join("")}
+        ${proximos.map(v=>`<p style="margin:0 0 4px">${v.patente} ${porVencer(v.rt)?"RT vence "+fecha(v.rt):""}${porVencer(v.rt)&&porVencer(v.permiso)?" · ":""}${porVencer(v.permiso)?"permiso vence "+fecha(v.permiso):""}</p>`).join("")}
+        <button class="btn ghost sm" data-act="verFlota" style="margin-top:8px">Ir a la flota</button>
+      </div></details>`:""}
     <div class="row" style="margin:14px 0 4px">
       <button class="btn acento" data-act="nueva">Nuevo arriendo</button>
       <button class="btn ghost" data-act="verFlota">Flota${pendFlota?` · ${pendFlota}`:""}</button>
@@ -1468,11 +1503,11 @@ function vistaFicha(){
       <button class="btn ghost sm" data-act="ajustes" style="margin-top:8px">Conectar ahora</button></div>`}
     <div class="row" style="margin:14px 0 2px">
       <button class="btn ghost sm" data-act="volver" aria-label="Salir sin guardar">‹ Salir</button>
-      <button class="btn ghost sm" data-act="borrar" style="margin-left:auto">Eliminar arriendo</button>
     </div>`
     + secciones[S.etapa](r)
     + (ix===ETAPAS.length-1
-       ? `<div class="row" style="margin:16px 0"><button class="btn wide" data-act="cerrar">${r.estado==="cerrado"?"Reabrir arriendo":"Cerrar arriendo"}</button></div>`
+       ? `<div class="row" style="margin:16px 0"><button class="btn wide" data-act="cerrar">${r.estado==="cerrado"?"Reabrir arriendo":"Cerrar arriendo"}</button></div>
+          <div class="row" style="margin:0 0 20px"><button class="btn ghost sm" data-act="borrar">Eliminar este arriendo</button></div>`
        : "");
 }
 
@@ -1480,6 +1515,16 @@ function resumenAdic(r){
   const a=r.adicionales||[];
   return a.length ? a.join(", ") : "Ninguno seleccionado";
 }
+/* Dos arriendos de la misma máquina que se pisan en fechas es un error caro:
+   se detecta al elegir patente, no cuando el cliente llega al patio. */
+function choques(r){
+  if(!r.patente || !r.fi) return [];
+  const desde = r.fi, hasta = r.ft || r.fi;
+  return S.indice.filter(f=>
+    f.id !== r.id && f.patente === r.patente && f.estado !== "cerrado" &&
+    f.fi && (f.fi <= hasta) && ((f.ft || f.fi) >= desde));
+}
+
 function secDatos(r){
   const veh=ordenaFlota(S.flota);
   const v=S.flota.find(x=>x.patente===r.patente);
@@ -1489,6 +1534,10 @@ function secDatos(r){
       <label class="f"><span>Patente</span><select data-set="patente"><option value="">Seleccionar…</option>
         ${veh.map(x=>`<option value="${x.patente}" ${r.patente===x.patente?"selected":""}>${x.patente}${x.suc&&x.suc!==r.suc?" · base "+x.suc:""}</option>`).join("")}</select></label>
     </div>
+    ${(()=>{ const ch=choques(r); return ch.length?`<div class="aviso" style="margin:0 0 10px">
+      <b>${esc(r.patente)} ya tiene un arriendo en esas fechas.</b>
+      ${ch.map(f=>`<br>${esc(f.cliente||"sin cliente")} · ${fecha(f.fi)} → ${fecha(f.ft)}</br>`).join("")}
+      Revisa antes de seguir.</div>`:""; })()}
     ${v?`<p class="hint">Mantención: ${esc(v.mant)} · RT ${fecha(v.rt)} <span class="badge ${venc(v.rt)?"bad":"ok"}">${venc(v.rt)?"vencida":"vigente"}</span> · Permiso ${fecha(v.permiso)} <span class="badge ${venc(v.permiso)?"bad":"ok"}">${venc(v.permiso)?"vencido":"vigente"}</span></p>`:""}
     <label class="f"><span>Cliente</span><input type="text" data-set="cliente" value="${esc(r.cliente)}" placeholder="Nombre y apellido"></label>
     <div class="grid">
@@ -1777,6 +1826,7 @@ document.addEventListener("click", async ev=>{
     t.setAttribute("aria-pressed",!!S.r.prep[d.chk]); pintaRail(); pintaPie(); guardaFicha(); return; }
   if(d.vehabrir){ S.veh=d.vehabrir; S.verHist=10; S.vista="vehiculo"; pinta(); bajaFlota(true); return; }
   if(d.tarea){ await cargaFotosTarea(d.tarea); modalTarea(d.tarea); return; }
+  if(d.irA){ cierraModal(); S.etapa=d.irA; S.r.ultimaEtapa=d.irA; await guardaFicha(true); pinta(); return; }
   if(d.tarfoto){ pedirFotoTarea(d.cam); return; }
   if(d.taredel){ const t=FLOTA.tareas.find(x=>x.id===S.tarea);
     if(t){ t.fotos=(t.fotos||[]).filter(f=>f.id!==d.taredel);
@@ -1802,11 +1852,12 @@ document.addEventListener("click", async ev=>{
       S.vista="flota"; pinta();
     }, "Eliminar"); return; }
 
-  if(d.copiar){ copiar(d.copiar, "Ruta copiada"); return; }
 
   switch(d.act){
     case "verArchivo": S.vista="archivo"; pinta(); break;
     case "ajustes": S.vista="ajustes"; pinta(); break;
+    case "cerrarIgual": S.forzarCierre=true; cierraModal();
+      document.querySelector('[data-act="cerrar"]').click(); break;
     case "masHist": S.verHist=(S.verHist||10)+20; pinta(true); break;
     case "addTarea": { const t=nuevaTarea(S.veh,{}); pinta(true); modalTarea(t.id); break; }
     case "cerrarTarea": await tocaTarea(S.tarea,{estado:"listo", cerrado:Date.now()});
@@ -1853,12 +1904,23 @@ document.addEventListener("click", async ev=>{
     case "resumen": modalResumen(); break;
     case "borrar": confirmar("Se elimina la ficha completa con sus fotos. No se puede deshacer.", ()=>borraFicha(S.r.id), "Eliminar"); break;
     case "cerrar": { const cerrando=S.r.estado!=="cerrado";
-      if(cerrando && !S.r.ft){ S.etapa="datos"; pinta();
-        flash("Falta la fecha de término");
-        const f=document.querySelector('[data-set="ft"]'); if(f){ f.scrollIntoView({block:"center"}); f.focus({preventScroll:true}); }
-        break; } S.r.estado=cerrando?"cerrado":"borrador"; await guardaFicha();
       if(cerrando){
-        if(pendientes()){ flash("Espera a que terminen las subidas"); S.r.estado="borrador"; break; }
+        if(!S.r.ft || !S.r.patente){
+          const campo = !S.r.ft ? "ft" : "patente";
+          S.etapa="datos"; pinta();
+          flash(!S.r.ft ? "Falta la fecha de término" : "Falta elegir la patente");
+          const f=document.querySelector(`[data-set="${campo}"]`);
+          if(f){ f.scrollIntoView({block:"center"}); f.focus({preventScroll:true}); }
+          break;
+        }
+        if(pendientes()){ flash("Espera a que terminen las subidas"); break; }
+        const pend = faltantes(S.r);
+        if(pend.length && !S.forzarCierre){
+          modalCierre(pend); break;
+        }
+      }
+      S.forzarCierre=false; S.r.estado=cerrando?"cerrado":"borrador"; await guardaFicha();
+      if(cerrando){
         const ficha=S.r;
         const aFlota = await traspasaAFlota(ficha);
         if(hayDrive()){ flash("Subiendo documentos…",true);
@@ -1964,6 +2026,17 @@ function confirmar(texto, accion, etiqueta){
   modal(`<h3>Confirmar</h3><p style="margin:0 0 4px">${esc(texto)}</p>
     <div class="row" style="margin-top:14px"><button class="btn acento" data-act="confirmarSi" style="flex:1">${esc(etiqueta||"Sí, continuar")}</button></div>`);
 }
+function modalCierre(pend){
+  modal(`<h3>Antes de cerrar</h3>
+    <p style="margin:0 0 10px">Falta esto. Puedes volver a completarlo o cerrar igual.</p>
+    <ul class="arch">${pend.map(f=>`<li style="padding:7px 0">
+      <button class="btn ghost sm" data-ir-a="${f.etapa}" style="width:100%;justify-content:flex-start;text-align:left">
+        ${esc(f.t)}</button></li>`).join("")}</ul>
+    <div class="row" style="margin-top:14px">
+      <button class="btn acento" data-act="cerrarIgual" style="flex:1">Cerrar de todos modos</button>
+    </div>`);
+}
+
 function modalVehiculo(){
   modal(`<h3>Agregar vehículo</h3>
     <label class="f"><span>Patente</span><input type="text" id="nvPat" placeholder="Ej: SFCX21" autocapitalize="characters"></label>
