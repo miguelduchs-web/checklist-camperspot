@@ -439,10 +439,25 @@ async function guardaIndice(){
   await St.set("borradas", JSON.stringify(S.borradas||[]));
 }
 
+/* Elegir una patente para mirar no debería crear un arriendo. Recién se
+   archiva cuando hay algo escrito o marcado, o al apretar Guardar y salir. */
+function tieneContenido(r){
+  if((r.cliente||"").trim()) return true;
+  if(Object.values(r.prep||{}).some(Boolean)) return true;
+  if(Object.values(r.rev||{}).some(Boolean)) return true;
+  if((r.adicionales||[]).length) return true;
+  if((r.danos||[]).length) return true;
+  if(Object.values(r.media||{}).some(a=>(a||[]).length)) return true;
+  if(Object.values(r.driveVids||{}).some(a=>(a||[]).length)) return true;
+  if((r.entrega||{}).km || (r.reporte||{}).km) return true;
+  if((r.obs||"").trim()) return true;
+  return false;
+}
+
 async function guardaFicha(forzar){
   const r=S.r; if(!r) return;
   const yaExiste = S.indice.some(x=>x.id===r.id);
-  if(!yaExiste && !forzar && !r.patente && !r.cliente) return;   // ficha en blanco: no se archiva
+  if(!yaExiste && !forzar && !tieneContenido(r)) return;   // aún no hay nada que archivar
   if(!r.driveCarpeta) r.driveNombre = nombreCarpeta(r);
   else if(r.driveNombre !== nombreCarpeta(r)) setTimeout(()=>renombraCarpeta(r), 0);
   r.act=Date.now();
@@ -464,7 +479,16 @@ async function abreFicha(id){
   let raw = await St.get("r:"+id);
   if(!raw){
     const baja = await traeFicha(id);
-    if(!baja) return flash("Esa ficha se creó en otro dispositivo y no se pudo traer");
+    if(!baja){
+      const res = S.indice.find(x=>x.id===id) || {};
+      modal(`<h3>Este arriendo no tiene datos</h3>
+        <p style="margin:0 0 10px">Aparece en la lista pero su ficha no está ni en este dispositivo
+        ni en Drive. Suele pasar con registros creados por error o borrados a medias.</p>
+        <div class="aviso" style="margin:0 0 12px"><b>${esc(res.carpeta||res.patente||"Sin datos")}</b><br>
+          ${esc(res.cliente||"Sin cliente")} · ${res.pct||0}% completo</div>
+        <button class="btn acento wide" data-limpiahuerfana="${id}">Quitarlo de la lista</button>`);
+      return;
+    }
     raw = JSON.stringify(baja);
   }
   S.r = JSON.parse(raw); S.vista="ficha";
@@ -967,7 +991,7 @@ async function renombraCarpeta(r){
   finally{ RENOMBRANDO = false; }
 }
 
-const datosListos = r => !!(r && r.patente && r.cliente && (r.ft || r.fi));
+const datosListos = r => !!(r && r.patente && (r.cliente||"").trim() && (r.ft || r.fi));
 
 async function alistaVideos(){
   const r=S.r;
@@ -1158,10 +1182,19 @@ function marcaParaSubir(id){
 /* Al abrir una ficha que este dispositivo no tiene, se baja de su carpeta */
 async function traeFicha(id){
   const res = S.indice.find(x=>x.id===id);
-  if(!res || !res.driveCarpeta || !hayDrive() || !navigator.onLine) return null;
+  if(!res || !hayDrive() || !navigator.onLine) return null;
   try{
     flash("Trayendo la ficha…", true);
-    const { carpetaId } = await api("/carpeta", { ruta:["Ficha"], padreId:res.driveCarpeta });
+    /* Si el índice no trae la carpeta, se busca por su nombre en la raíz */
+    let padre = res.driveCarpeta;
+    if(!padre && res.carpeta){
+      const raizId = await carpetaRaiz();
+      const lista = await api("/listar?carpetaId="+encodeURIComponent(raizId));
+      const c = (lista.files||[]).find(f=>f.name===res.carpeta);
+      padre = c && c.id;
+    }
+    if(!padre) return null;
+    const { carpetaId } = await api("/carpeta", { ruta:["Ficha"], padreId:padre });
     const d = await api(`/json?carpetaId=${encodeURIComponent(carpetaId)}&nombre=ficha.json`);
     if(d && d.contenido && d.contenido.id === id){
       await St.set("r:"+id, JSON.stringify(d.contenido));
@@ -2140,6 +2173,9 @@ document.addEventListener("click", async ev=>{
     S.etapa=ETAPAS[i].k; S.r.ultimaEtapa=S.etapa; await guardaFicha(true); pinta();
     if(S.etapa==="entrega") alistaVideos(); return; }
   if(d.abre){ await abreFicha(d.abre); return; }
+  if(d.limpiahuerfana){ cierraModal(); await borraFicha(d.limpiahuerfana);
+    S.vista = S.vista==="archivo" ? "archivo" : "inicio"; pinta();
+    flash("Registro quitado"); return; }
   if(d.borrafi){ const f=S.indice.find(x=>x.id===d.borrafi)||{};
     confirmar(`Se elimina ${f.carpeta||"esta ficha"} de este dispositivo, con sus fotos locales. Lo que está en Drive no se toca.`,
       async()=>{ await borraFicha(d.borrafi); S.vista="archivo"; pinta(); }, "Eliminar");
@@ -2238,6 +2274,10 @@ document.addEventListener("click", async ev=>{
         await guardaFlota(); cierraModal(); pinta(true); flash("Tarea eliminada");
       }, "Eliminar"); break; }
     case "salir": {
+      if(S.r && !S.indice.some(x=>x.id===S.r.id) && !tieneContenido(S.r)){
+        S.original=null; S.vista="inicio"; S.r=null; pinta();
+        flash("No había nada que guardar"); break;
+      }
       if(S.r){ S.r.ultimaEtapa=S.etapa; await guardaFicha(true); }
       const guardada = S.r && S.indice.some(x=>x.id===S.r.id);
       S.original=null; S.vista="inicio"; S.r=null; pinta();
@@ -2247,7 +2287,7 @@ document.addEventListener("click", async ev=>{
       if(pendientes()) { flash("Espera a que terminen las subidas"); break; }
       {
         const r=S.r||{}, guardada=S.indice.some(x=>x.id===r.id);
-        const hayQuePerder = guardada ? hayCambios() : !!(r.patente || r.cliente);
+        const hayQuePerder = guardada ? hayCambios() : tieneContenido(r);
         if(hayQuePerder)
           confirmar("Se pierde lo que escribiste desde que abriste la ficha. Las fotos y videos que ya subieron a Drive se quedan.",
                     descartaCambios, "Salir sin guardar");
