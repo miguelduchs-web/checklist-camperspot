@@ -182,7 +182,6 @@ section.bloque h2.tit{font-size:20px;margin:0 0 2px;display:flex;align-items:cen
 .modal{position:fixed;inset:0;background:rgba(26,30,18,.62);display:flex;align-items:flex-end;justify-content:center;z-index:60}
 .modal .box{background:#fff;width:100%;max-width:820px;max-height:88vh;overflow:auto;border-radius:10px 10px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom))}
 .modal h3{margin:0 0 10px;font-size:21px}
-.sig{width:100%;height:180px;border:1px dashed #B6C09E;border-radius:4px;background:#FBFCF8;touch-action:none;display:block}
 .ruta{border:1px solid var(--linea);border-radius:4px;background:#FBFCF8;padding:10px;margin-bottom:10px}
 .ruta>span{display:block;font-size:12.5px;color:var(--gris);margin-bottom:5px}
 .ruta code{display:block;font-family:ui-monospace,monospace;font-size:12.5px;word-break:break-all;margin-bottom:8px;color:var(--tinta)}
@@ -344,7 +343,7 @@ const fecha = s=>s?s.split("-").reverse().join("/"):"—";
 
 function nuevaFicha(){
   return { id:uid(), suc:S.suc, patente:"", cliente:"", fi:hoy(), ft:"", adicionales:[], obs:"",
-    prep:{}, prepNota:"", entrega:{km:"", firma:""}, rev:{}, revNota:{},
+    prep:{}, entrega:{km:""}, rev:{}, revNota:{},
     danos:[], reporte:{km:"", bencina:"", gas:"0", nota:""},
     media:{}, estado:"borrador", creado:Date.now(), act:Date.now() };
 }
@@ -472,6 +471,7 @@ async function abreFicha(id){
   if((S.r.ultimaEtapa||"")==="entrega") setTimeout(alistaVideos,300);
   S.etapa = (S.r.ultimaEtapa && ETAPAS.some(e=>e.k===S.r.ultimaEtapa)) ? S.r.ultimaEtapa : faseDe(S.r).etapa;
   S.original = raw;            // copia intacta, para poder salir sin guardar
+  S.baseAct = (S.indice.find(x=>x.id===id)||{}).act || S.r.act || 0;
   pinta();
 }
 
@@ -1069,18 +1069,28 @@ async function subeArriendos(){
   SYNC.subiendo = true;
   try{
     /* Primero cada ficha marcada, en su propia carpeta */
+    const carpetaId = await carpetaEstado();
+    const d = await api(`/json?carpetaId=${encodeURIComponent(carpetaId)}&nombre=indice.json`);
+    const remoto = new Map(((d&&d.contenido&&d.contenido.lista)||[]).map(f=>[f.id,f]));
+
     for(const id of [...SYNC.pendientes]){
       const raw = await St.get("r:"+id);
       if(!raw){ SYNC.pendientes.delete(id); continue; }
       const r = JSON.parse(raw);
       if(!r.patente && !r.cliente){ SYNC.pendientes.delete(id); continue; }
-      const carpetaId = await carpetaSub(r, "Ficha");
-      await api("/json", { carpetaId, nombre:"ficha.json", contenido:r });
+
+      /* Alguien más guardó esta misma ficha después de que la abrimos:
+         no se pisa en silencio, se avisa y se deja decidir. */
+      const suyo = remoto.get(id);
+      if(suyo && S.r && S.r.id===id && S.baseAct && suyo.act > S.baseAct && suyo.act > (r.act||0)){
+        SYNC.pendientes.delete(id);
+        avisaChoque(id, suyo);
+        continue;
+      }
+      const carpFicha = await carpetaSub(r, "Ficha");
+      await api("/json", { carpetaId:carpFicha, nombre:"ficha.json", contenido:r });
       SYNC.pendientes.delete(id);
     }
-    /* Después el índice, fusionado con lo que haya subido otro dispositivo */
-    const carpetaId = await carpetaEstado();
-    const d = await api(`/json?carpetaId=${encodeURIComponent(carpetaId)}&nombre=indice.json`);
     const m = fusionaIndice(S.indice, d && d.contenido);
     S.indice = m.lista; S.borradas = m.borradas;
     await api("/json", { carpetaId, nombre:"indice.json",
@@ -1089,6 +1099,24 @@ async function subeArriendos(){
     SYNC.ultimo = Date.now();
   }catch(e){ /* se reintenta al volver la señal */ }
   finally{ SYNC.subiendo = false; }
+}
+
+/* Dos personas en la misma ficha a la vez. Poco probable con este volumen,
+   pero si pasa conviene que se note en vez de perder trabajo en silencio. */
+let CHOQUE_AVISADO = 0;
+function avisaChoque(id, suyo){
+  if(Date.now() - CHOQUE_AVISADO < 60000) return;
+  CHOQUE_AVISADO = Date.now();
+  modal(`<h3>Alguien más editó este arriendo</h3>
+    <p style="margin:0 0 10px">Se guardó una versión desde otro dispositivo mientras tenías esta abierta.
+    Para no perder ninguno de los dos trabajos, tus cambios no se subieron todavía.</p>
+    <div class="aviso" style="margin:0 0 12px"><b>${esc(suyo.carpeta||"")}</b><br>
+      Guardado a las ${new Date(suyo.act).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})}
+      desde otro dispositivo.</div>
+    <div class="row">
+      <button class="btn acento" data-act="ganarYo" style="flex:1">Subir lo mío igual</button>
+      <button class="btn ghost" data-act="traerSuyo" style="flex:1">Traer lo del otro</button>
+    </div>`);
 }
 
 function marcaParaSubir(id){
@@ -1802,7 +1830,6 @@ function secPrep(r){
         <button class="chk" data-chk="a:${esc(a)}" aria-pressed="${!!r.prep["a:"+a]}"><span class="box"></span>${a}</button></li>`).join("")}</ul>`
      :`<p class="hint" style="padding:10px 14px;margin:0;border-top:1px solid var(--linea)">Sin adicionales contratados. Se agregan desde Arriendo.</p>`}
     <div class="pad" style="border-top:1px solid var(--linea)">
-      <label class="f"><span>Notas de preparación</span><textarea data-set="prepNota" placeholder="Repuestos pendientes, detalles a resolver…">${esc(r.prepNota)}</textarea></label>
       <button class="btn ghost sm" data-act="prepNone">Limpiar marcas</button>
     </div></div>`;
 }
@@ -1841,14 +1868,10 @@ function secEntrega(r){
       S.revisando?"Revisando…":"Se confirma solo cada 20 segundos mientras sigas aquí."}</p>
   </div></div>
 
-  <div class="card"><h3>Tablero y firma</h3>
+  <div class="card"><h3>Tablero y millaje</h3>
     ${slotHTML(SLOTS.find(x=>x.k==="f_tab_s"),r)}
     <div class="pad">
-    <label class="f"><span>Millaje de salida</span><input type="number" inputmode="numeric" data-set="entrega.km" value="${esc(r.entrega.km)}" placeholder="Ej: 189603"></label>
-    <span style="display:block;font-size:13px;color:var(--gris);margin-bottom:3px">Firma del cliente</span>
-    ${r.entrega.firma?`<img src="${r.entrega.firma}" alt="Firma registrada" style="width:100%;max-width:320px;border:1px solid var(--linea);border-radius:4px;background:#fff">
-      <div class="row" style="margin-top:8px"><button class="btn ghost sm" data-act="firmar">Volver a firmar</button></div>`
-     :`<button class="btn ghost wide" data-act="firmar">Capturar firma</button>`}
+    <label class="f" style="margin:0"><span>Millaje de salida</span><input type="number" inputmode="numeric" data-set="entrega.km" value="${esc(r.entrega.km)}" placeholder="Ej: 189603"></label>
   </div></div>`;
 }
 
@@ -1943,7 +1966,7 @@ function secReporte(r){
   <div class="card"><h3>Cierre</h3><div class="pad">
     <div class="grid">
       <label class="f"><span>Millaje de llegada</span><input type="number" inputmode="numeric" data-set="reporte.km" value="${esc(r.reporte.km)}" placeholder="Ej: 190450"></label>
-      <label class="f"><span>Uso de millaje</span><input type="text" value="${km>0?km.toLocaleString("es-CL"):"—"}" readonly style="background:#EAEEE0"></label>
+      <label class="f"><span>Uso de millaje</span><input type="text" id="usoKm" value="${km>0?km.toLocaleString("es-CL"):"—"}" readonly style="background:#EAEEE0"></label>
     </div>
     <div class="grid">
       <label class="f"><span>Estado de bencina</span><select data-set="reporte.bencina">
@@ -1952,7 +1975,6 @@ function secReporte(r){
       <label class="f"><span>Pedir gas (balones)</span><select data-set="reporte.gas">
         ${["0","1","2"].map(g=>`<option ${r.reporte.gas===g?"selected":""}>${g}</option>`).join("")}</select></label>
     </div>
-    <label class="f"><span>Comentario final</span><textarea data-set="reporte.nota" placeholder="Qué queda pendiente para el próximo arriendo">${esc(r.reporte.nota)}</textarea></label>
     <button class="btn wide" data-act="resumen" style="margin-top:6px">Ver resumen del arriendo</button>
   </div></div>
 
@@ -1984,10 +2006,6 @@ function cardArchivo(r){
         : `<div class="aviso" style="margin:0"><b>Drive sin conectar.</b><br>Nada se está respaldando.
            <button class="btn ghost sm" data-act="ajustes" style="margin-top:8px">Conectar</button></div>`}
     ${sinSubir.length?`<p class="hint"><b>${sinSubir.length} archivo(s) sin respaldar.</b> Tócalos en su sección para ver el motivo.</p>`:""}
-    <div class="row" style="margin-top:12px">
-      <button class="btn ghost sm" data-act="bajarResumen">Bajar resumen.txt</button>
-      <button class="btn ghost sm" data-act="bajarJson">Bajar ficha.json</button>
-    </div>
   </div></div>`;
 }
 
@@ -2094,6 +2112,19 @@ document.addEventListener("click", async ev=>{
 
   switch(d.act){
     case "verArchivo": S.vista="archivo"; pinta(); break;
+    case "ganarYo":
+      S.baseAct = Date.now(); cierraModal();
+      if(S.r){ S.r.act = Date.now(); await guardaFicha(true); }
+      flash("Se subió tu versión"); break;
+    case "traerSuyo": {
+      const id = S.r && S.r.id; cierraModal();
+      if(!id) break;
+      await St.del("r:"+id);
+      const baja = await traeFicha(id);
+      if(baja){ S.r = baja; S.original = JSON.stringify(baja); S.baseAct = baja.act||0;
+                pinta(); flash("Se trajo la versión del otro dispositivo"); }
+      else flash("No se pudo traer la otra versión");
+      break; }
     case "sincronizar": flash("Buscando cambios…",true);
       await bajaArriendos(false); await bajaFlota(true); break;
     case "ajustes": S.vista="ajustes"; pinta(); break;
@@ -2138,8 +2169,6 @@ document.addEventListener("click", async ev=>{
         else { S.original=null; S.vista="inicio"; S.r=null; pinta(); }
       }
       break;
-    case "bajarResumen": baja(nombreCarpeta(S.r)+"_resumen.txt", textoResumen(S.r), "text/plain"); break;
-    case "bajarJson": baja(nombreCarpeta(S.r)+"_ficha.json", JSON.stringify(fichaExport(S.r),null,2), "application/json"); break;
     case "nueva": S.r=nuevaFicha(); S.original=null; S.vista="ficha"; S.etapa="datos"; pinta(); break;
     case "inicio": {
       const enBlanco = S.r && !S.indice.some(x=>x.id===S.r.id);
@@ -2150,7 +2179,6 @@ document.addEventListener("click", async ev=>{
     case "prepNone": confirmar("¿Desmarcar todos los ítems de preparación?", async()=>{ S.r.prep={}; await guardaFicha(); pinta(true); }); break;
     case "addDano": { const nd={id:uid(),zona:"",desc:"",fotos:[]}; S.r.danos.push(nd); await guardaFicha(); pinta(true);
       const c=document.querySelector(`[data-dano="${nd.id}"][data-c="zona"]`); if(c){ c.scrollIntoView({block:"center",behavior:"smooth"}); c.focus({preventScroll:true}); } break; }
-    case "firmar": modalFirma(); break;
     case "resumen": modalResumen(); break;
     case "borrar": confirmar("Se elimina la ficha completa con sus fotos. No se puede deshacer.", ()=>borraFicha(S.r.id), "Eliminar"); break;
     case "cerrar": { const cerrando=S.r.estado!=="cerrado";
@@ -2209,6 +2237,11 @@ document.addEventListener("input", ev=>{
   if(d.set){ const ruta=d.set.split("."); let o=S.r;
     for(let i=0;i<ruta.length-1;i++) o=o[ruta[i]];
     o[ruta.at(-1)]=el.value;
+    if(d.set==="reporte.km" || d.set==="entrega.km"){
+      const uso=document.getElementById("usoKm");
+      if(uso){ const n=(Number(S.r.reporte.km)||0)-(Number(S.r.entrega.km)||0);
+        uso.value = n>0 ? n.toLocaleString("es-CL") : "—"; }
+    }
     if(d.set==="fi"){
       const ft=document.querySelector('[data-set="ft"]');
       if(ft){ ft.min = el.value || "";
@@ -2320,26 +2353,6 @@ function modal(html){
     `<div class="modal"><div class="box">${html}
       <div class="row" style="margin-top:14px"><button class="btn ghost wide" data-act="cerrarModal">Cerrar</button></div></div></div>`;
 }
-function modalFirma(){
-  modal(`<h3>Firma del cliente</h3><p class="hint" style="margin-bottom:8px">Firme con el dedo sobre el recuadro.</p>
-    <canvas class="sig" id="sig"></canvas>
-    <div class="row" style="margin-top:10px"><button class="btn ghost" id="sigClr">Borrar</button>
-    <button class="btn acento" id="sigOk" style="flex:1">Guardar firma</button></div>`);
-  const c=document.getElementById("sig");
-  c.width=c.offsetWidth*2; c.height=c.offsetHeight*2;
-  const x=c.getContext("2d"); x.scale(2,2); x.lineWidth=2.2; x.lineCap="round"; x.strokeStyle="#1A1E12";
-  let dib=false, vacio=true;
-  const pt=e=>{const b=c.getBoundingClientRect();return[e.clientX-b.left,e.clientY-b.top]};
-  c.addEventListener("pointerdown",e=>{dib=true;vacio=false;c.setPointerCapture(e.pointerId);x.beginPath();x.moveTo(...pt(e))});
-  c.addEventListener("pointermove",e=>{if(dib){x.lineTo(...pt(e));x.stroke()}});
-  c.addEventListener("pointerup",()=>dib=false);
-  document.getElementById("sigClr").onclick=()=>{x.clearRect(0,0,c.width,c.height);vacio=true};
-  document.getElementById("sigOk").onclick=async()=>{
-    if(vacio) return flash("La firma está vacía");
-    S.r.entrega.firma=c.toDataURL("image/png");
-    document.getElementById("modales").innerHTML=""; await guardaFicha(); pinta();
-  };
-}
 function textoResumen(r){
   const L=[], [n,t]=progTotal(r);
   L.push(`CHECKLIST MOTORHOME — CAMPERSPOT ${r.suc.toUpperCase()}`);
@@ -2351,11 +2364,9 @@ function textoResumen(r){
   const itp=itemsPrep(r), pend=itp.filter(x=>!r.prep[x.k]);
   L.push(``,`PREPARACIÓN: ${itp.length-pend.length}/${itp.length}`);
   if(pend.length) L.push(`Pendiente: ${pend.map(x=>x.t+(x.adic?" (adicional)":"")).join(", ")}`);
-  if(r.prepNota) L.push(`Nota: ${r.prepNota}`);
   L.push(``,`ENTREGA`,`Millaje de salida: ${r.entrega.km||"—"}`);
   L.push(`Videos del recorrido: ${cuentaVideos(r)} de 3`);
   L.push(`Foto al tablero: ${(r.media.f_tab_s||[]).length?"sí":"pendiente"}`);
-  L.push(`Firma del cliente: ${r.entrega.firma?"registrada":"pendiente"}`);
   L.push(``,`REVISIÓN`);
   REV_GRUPOS.forEach(g=>{
     const its=itemsRev(g,r);
@@ -2374,7 +2385,6 @@ function textoResumen(r){
   hs.forEach(h=>L.push(`  · ${h.t} (${h.grupo}) — DAÑO${h.nota?": "+h.nota:""} [${h.media.length} respaldo/s]`));
   r.danos.forEach(d=>L.push(`  · ${d.zona||"sin zona"}: ${d.desc||"sin descripción"} [${(d.fotos||[]).length} respaldo/s]`));
   if(!hs.length&&!r.danos.length) L.push(`  Sin daños registrados.`);
-  if(r.reporte.nota) L.push(`Comentario: ${r.reporte.nota}`);
   return L.join("\n");
 }
 function modalResumen(){
@@ -2393,13 +2403,6 @@ function modalResumen(){
 async function copiar(txt,msg){
   try{ await navigator.clipboard.writeText(txt); flash(msg||"Copiado"); }
   catch(e){ modal(`<h3>Copia esto</h3><pre class="res">${esc(txt)}</pre>`); }
-}
-function baja(nombre,contenido,tipo){
-  try{
-    const b=new Blob([contenido],{type:tipo}), u=URL.createObjectURL(b);
-    const a=document.createElement("a"); a.href=u; a.download=nombre; a.click();
-    setTimeout(()=>URL.revokeObjectURL(u),3000); flash("Descargando "+nombre);
-  }catch(e){ modal(`<h3>${esc(nombre)}</h3><pre class="res">${esc(contenido)}</pre>`); }
 }
 function fichaExport(r){
   const ru=rutas(r), ar=archivosDe(r);
