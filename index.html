@@ -1267,6 +1267,8 @@ function fusiona(local, remoto){
   for(const p of patentes){
     const a=(local.veh||{})[p], b=(remoto.veh||{})[p];
     const base0 = !a ? b : !b ? a
+      : a.provisional && !b.provisional ? b
+      : b.provisional && !a.provisional ? a
       : ((a.act||0) >= (b.act||0) ? {...b,...a} : {...a,...b});
     if(out.bajas["v:"+p] && out.bajas["v:"+p] >= (base0.act||0)) continue;
     const base = {...base0};
@@ -1293,11 +1295,12 @@ async function cargaFlota(){
   if(raw){ try{ FLOTA = JSON.parse(raw); }catch(e){} }
   FLOTA.veh = FLOTA.veh || {}; FLOTA.tareas = FLOTA.tareas || []; FLOTA.bajas = FLOTA.bajas || {};
   const bajo = await bajaFlota(true);
-  /* Los vehículos de fábrica solo se siembran si no hay nada en ninguna parte.
-     Si la descarga falló, se espera: rellenar traería fechas viejas como buenas. */
-  if(!Object.keys(FLOTA.veh).length && (bajo || !hayDrive())){
-    FLOTA_BASE.forEach(v=>{ FLOTA.veh[v.patente] = {...v, act:Date.now()}; });
-    await guardaFlota();
+  /* Los vehículos de fábrica se siembran con act:0 a propósito: son un relleno
+     provisional para que la app no se vea vacía, y NUNCA deben ganarle a un dato
+     real al fusionar. Con una marca de tiempo actual sobrescribían Drive. */
+  if(!Object.keys(FLOTA.veh).length){
+    FLOTA_BASE.forEach(v=>{ FLOTA.veh[v.patente] = {...v, act:0, provisional:true}; });
+    await St.set("flotaEstado", JSON.stringify(FLOTA));   // local, sin subir
   }
 }
 
@@ -1330,6 +1333,9 @@ async function guardaFlota(){
 
 async function subeFlota(){
   if(!hayDrive() || !navigator.onLine || FLOTA_SYNC.subiendo) return;
+  const soloRelleno = Object.values(FLOTA.veh||{}).every(v=>v.provisional)
+                      && !FLOTA.tareas.length;
+  if(soloRelleno){ FLOTA_SYNC.sucio = false; return; }
   FLOTA_SYNC.subiendo = true;
   try{
     const d = await api("/estado");                       // fusionar antes de escribir
@@ -1730,6 +1736,10 @@ function vistaFlota(){
       <button class="btn ghost" data-act="addVeh">Agregar vehículo</button>
     </div>
     <h2 class="tit" style="font-size:22px;margin:0 0 4px">Flota</h2>
+    ${Object.values(FLOTA.veh||{}).every(v=>v.provisional)&&hayDrive()
+      ? `<div class="aviso"><b>Datos provisionales.</b><br>
+         Todavía no se leyó la flota desde Drive, así que estas fechas son las de fábrica.
+         <button class="btn ghost sm" data-act="sincronizar" style="margin-top:8px">Traer desde Drive</button></div>`:""}
     <p class="hint" style="margin:0 0 14px">${abiertas
       ? `${abiertas} tarea(s) abierta(s) en total.`
       : "Sin tareas pendientes en ninguna máquina."}${FLOTA_SYNC.ultimo
@@ -2400,7 +2410,7 @@ document.addEventListener("input", ev=>{
   if(d.veh){ const v=FLOTA.veh[d.veh]; if(v){
       v[d.c] = (d.c==="km"||d.c==="kmMant") ? (Number(el.value)||0) : el.value;
       if(d.c==="km") v.kmFecha = hoy();
-      v.act = Date.now(); S.flota = listaFlota();
+      v.act = Date.now(); delete v.provisional; S.flota = listaFlota();
       clearTimeout(tmr); tmr=setTimeout(guardaFlota, 500);
     } return; }
   if(d.tarc){ const t=buscaTarea(S.tarea); if(t){
