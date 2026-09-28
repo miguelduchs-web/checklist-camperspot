@@ -1021,6 +1021,7 @@ async function guardaFlota(){
   FLOTA.act = Date.now();
   await St.set("flotaEstado", JSON.stringify(FLOTA));
   FLOTA_SYNC.sucio = true;
+  if(S.vista==="vehiculo") pintaPieVeh();
   clearTimeout(guardaFlota._t);
   guardaFlota._t = setTimeout(subeFlota, 700);
 }
@@ -1036,7 +1037,10 @@ async function subeFlota(){
     FLOTA_SYNC.sucio = false; FLOTA_SYNC.ultimo = Date.now();
   }catch(e){
     FLOTA_SYNC.sucio = true;                              // se reintenta al volver la señal
-  }finally{ FLOTA_SYNC.subiendo = false; }
+  }finally{
+    FLOTA_SYNC.subiendo = false;
+    if(S.vista==="vehiculo") pintaPieVeh();
+  }
 }
 
 function nuevaTarea(patente, datos){
@@ -1228,6 +1232,7 @@ function pinta(keep){
     : SUCURSALES.map(x=>`<button data-suc="${x}" aria-pressed="${S.suc===x}">${x}</button>`).join("");
   const rail=document.getElementById("rail"), pie=document.getElementById("pie");
   if(S.vista==="ficha"&&S.r){ rail.hidden=false; pie.hidden=false; pintaRail(); pintaPie(); }
+  else if(S.vista==="vehiculo"&&FLOTA.veh[S.veh]){ rail.hidden=true; pie.hidden=false; pintaPieVeh(); }
   else { rail.hidden=true; pie.hidden=true; }
   pintaConexion();
   if(S.vista==="inicio") vistaInicio();
@@ -1246,6 +1251,18 @@ function pintaRail(){
       <i>${n}/${t}</i></button>`;
   }).join("");
 }
+function pintaPieVeh(){
+  const v = FLOTA.veh[S.veh] || {};
+  const ab = abiertasDe(S.veh);
+  const estado = FLOTA_SYNC.subiendo ? "Guardando…"
+    : FLOTA_SYNC.sucio ? (navigator.onLine ? "Con cambios sin subir" : "Sin conexión · se sube al volver")
+    : FLOTA_SYNC.ultimo ? "Guardado "+new Date(FLOTA_SYNC.ultimo).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})
+    : hayDrive() ? "Se guarda al escribir" : "Solo en este dispositivo";
+  document.getElementById("pieIn").innerHTML=`
+    <div class="est"><b>${esc(S.veh)} · ${ab?ab+" pendiente"+(ab>1?"s":""):"al día"}</b>${estado}</div>
+    <button class="btn acento sm salir" data-act="salirVeh">Guardar y salir</button>`;
+}
+
 function pintaPie(){
   const[n,t]=progTotal(S.r), p=Math.round(n/t*100);
   const g=!S.indice.some(x=>x.id===S.r.id) ? "Se guarda al escribir"
@@ -1381,7 +1398,7 @@ function vistaVehiculo(){
 
   app.innerHTML=`<div class="row" style="margin:14px 0">
       <button class="btn ghost sm" data-act="verFlota">‹ Flota</button>
-      <button class="btn acento sm" data-act="addTarea" style="margin-left:auto">Agregar tarea</button>
+      <button class="btn ghost sm" data-act="addTarea" style="margin-left:auto">Agregar tarea</button>
     </div>
     <h2 class="tit" style="font-size:26px;margin:0 0 2px">${esc(v.patente)}</h2>
     <p class="hint" style="margin:0 0 14px">${esc(v.suc||"")}${v.km
@@ -1870,6 +1887,15 @@ document.addEventListener("click", async ev=>{
     case "ajustes": S.vista="ajustes"; pinta(); break;
     case "cerrarIgual": S.forzarCierre=true; cierraModal();
       document.querySelector('[data-act="cerrar"]').click(); break;
+    case "salirVeh":
+      clearTimeout(guardaFlota._t);
+      if(FLOTA_SYNC.sucio && hayDrive() && navigator.onLine){
+        flash("Guardando…", true); pintaPieVeh();
+        await subeFlota();
+      }
+      flash(FLOTA_SYNC.sucio ? "Guardado en el teléfono · se sube al volver la señal" : "Cambios guardados");
+      S.vista="flota"; S.veh=null; pinta();
+      break;
     case "masHist": S.verHist=(S.verHist||10)+20; pinta(true); break;
     case "addTarea": { const t=nuevaTarea(S.veh,{}); pinta(true); modalTarea(t.id); break; }
     case "cerrarTarea": await tocaTarea(S.tarea,{estado:"listo", cerrado:Date.now()});
