@@ -75,6 +75,8 @@ input[type=text],input[type=date],input[type=number],select,textarea{
 textarea{min-height:78px;resize:vertical}
 input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid var(--oliva-cl);outline-offset:1px}
 .hint{font-size:13px;color:var(--gris);margin:6px 0 0}
+button.enlace{background:none;border:0;padding:0 0 0 6px;color:var(--oliva-cl);font-size:13px;
+  text-decoration:underline;font-family:inherit}
 h2.tit{color:var(--oliva);text-transform:uppercase;letter-spacing:.03em}
 
 /* ---------- items ---------- */
@@ -415,9 +417,15 @@ async function bootstrap(){
   setTimeout(liberaFotosViejas, 4000);
   const ix = await St.get("indice");
   S.indice = ix ? JSON.parse(ix) : [];
+  const bo = await St.get("borradas");
+  S.borradas = bo ? JSON.parse(bo) : [];
+  bajaArriendos(true);
   pinta();
 }
-async function guardaIndice(){ await St.set("indice", JSON.stringify(S.indice)); }
+async function guardaIndice(){
+  await St.set("indice", JSON.stringify(S.indice));
+  await St.set("borradas", JSON.stringify(S.borradas||[]));
+}
 
 async function guardaFicha(forzar){
   const r=S.r; if(!r) return;
@@ -427,20 +435,26 @@ async function guardaFicha(forzar){
   else if(r.driveNombre !== nombreCarpeta(r)) setTimeout(()=>renombraCarpeta(r), 0);
   r.act=Date.now();
   const [n,t]=progTotal(r);
-  const res={id:r.id,suc:r.suc,patente:r.patente,cliente:r.cliente,fi:r.fi,ft:r.ft,
-             estado:r.estado,act:r.act,pct:Math.round(n/t*100),
-             mes:mesDe(r), carpeta:nombreCarpeta(r), fase:faseDe(r).k, driveCarpeta:r.driveCarpeta||""};
+  const res=resumenDe(r);
   const i=S.indice.findIndex(x=>x.id===r.id);
   if(i<0) S.indice.unshift(res); else S.indice[i]=res;
   await St.set("r:"+r.id, JSON.stringify(r));
   await guardaIndice();
+  marcaParaSubir(r.id);
   S.guardado=Date.now(); pintaPie();
+  if(r.patente){ clearTimeout(guardaFicha._flota);
+    guardaFicha._flota = setTimeout(()=>danosAFlota(r), 900); }
   if(hayDrive() && datosListos(r) && !PREPARANDO &&
      SLOTS_VIDEO.some(def=>!(r.driveSubs||{})["Videos/"+def.carpeta]))
     setTimeout(alistaVideos, 0);
 }
 async function abreFicha(id){
-  const raw = await St.get("r:"+id); if(!raw) return flash("No se encontró la ficha");
+  let raw = await St.get("r:"+id);
+  if(!raw){
+    const baja = await traeFicha(id);
+    if(!baja) return flash("Esa ficha se creó en otro dispositivo y no se pudo traer");
+    raw = JSON.stringify(baja);
+  }
   S.r = JSON.parse(raw); S.vista="ficha";
   if(!Array.isArray(S.r.adicionales)) S.r.adicionales = S.r.adicionales ? [S.r.adicionales] : [];
   delete S.r.operador;
@@ -494,7 +508,10 @@ async function borraFicha(id){
     for(const d of r.danos||[]) for(const m of d.fotos||[]) await St.del("f:"+m.id);
   }
   await St.del("r:"+id);
-  S.indice=S.indice.filter(x=>x.id!==id); await guardaIndice();
+  S.indice=S.indice.filter(x=>x.id!==id);
+  S.borradas=(S.borradas||[]).concat([{id, t:Date.now()}]);
+  await guardaIndice();
+  subeArriendos();
   if(S.r && S.r.id===id){ S.r=null; S.original=null; S.vista="inicio"; }
   pinta(); flash("Arriendo eliminado");
 }
@@ -983,6 +1000,120 @@ function buscaMedia(id){
 }
 
 
+
+/* ══════════ ARRIENDOS COMPARTIDOS ══════════
+   El índice vive en un archivo en Drive y cada ficha guarda su copia
+   completa en su propia carpeta. Así cualquier dispositivo ve los mismos
+   arriendos, y el teléfono solo descarga la ficha que va a abrir. */
+
+let SYNC = { subiendo:false, ultimo:0, pendientes:new Set() };
+
+async function carpetaEstado(){
+  if(CFG.estadoId) return CFG.estadoId;
+  return unaVez("estado", async()=>{
+    if(CFG.estadoId) return CFG.estadoId;
+    const raizId = await carpetaRaiz();
+    const { carpetaId } = await api("/carpeta", { ruta:["_Flota"], padreId:raizId });
+    CFG.estadoId = carpetaId; await guardaCfg();
+    return carpetaId;
+  });
+}
+
+/* Índice: lo mínimo para dibujar la lista sin descargar cada ficha */
+function resumenDe(r){
+  const [n,t] = progTotal(r);
+  return { id:r.id, suc:r.suc, patente:r.patente, cliente:r.cliente, fi:r.fi, ft:r.ft,
+           estado:r.estado, act:r.act||Date.now(), pct:Math.round(n/t*100),
+           mes:mesDe(r), carpeta:nombreCarpeta(r), fase:faseDe(r).k,
+           driveCarpeta:r.driveCarpeta||"" };
+}
+
+function fusionaIndice(local, remoto){
+  if(!remoto) return { lista:local.slice(), borradas:(S.borradas||[]) };
+  const borradas = {};
+  for(const b of [...(remoto.borradas||[]), ...(S.borradas||[])])
+    if(!borradas[b.id] || b.t > borradas[b.id].t) borradas[b.id] = b;
+
+  const mapa = new Map();
+  for(const f of [...(remoto.lista||[]), ...local]){
+    const prev = mapa.get(f.id);
+    if(!prev || (f.act||0) >= (prev.act||0)) mapa.set(f.id, f);
+  }
+  for(const id of Object.keys(borradas)){
+    const f = mapa.get(id);
+    if(f && (f.act||0) <= borradas[id].t) mapa.delete(id);
+  }
+  return { lista:[...mapa.values()].sort((a,b)=>(b.act||0)-(a.act||0)),
+           borradas:Object.values(borradas).filter(b=>b.t > Date.now()-180*86400000) };
+}
+
+async function bajaArriendos(silencioso){
+  if(!hayDrive() || !navigator.onLine) return;
+  try{
+    const carpetaId = await carpetaEstado();
+    const d = await api(`/json?carpetaId=${encodeURIComponent(carpetaId)}&nombre=indice.json`);
+    const antes = S.indice.length;
+    const r = fusionaIndice(S.indice, d && d.contenido);
+    S.indice = r.lista; S.borradas = r.borradas;
+    await guardaIndice();
+    SYNC.ultimo = Date.now();
+    if(SYNC.pendientes.size) subeArriendos();
+    const nuevos = S.indice.length - antes;
+    if(!silencioso) flash(nuevos>0 ? `${nuevos} arriendo(s) nuevo(s)` : "Al día");
+    if(S.vista==="inicio"||S.vista==="archivo") pinta(true);
+  }catch(e){ if(!silencioso) flash("No se pudo sincronizar: "+corta(e.message)); }
+}
+
+async function subeArriendos(){
+  if(!hayDrive() || !navigator.onLine || SYNC.subiendo) return;
+  SYNC.subiendo = true;
+  try{
+    /* Primero cada ficha marcada, en su propia carpeta */
+    for(const id of [...SYNC.pendientes]){
+      const raw = await St.get("r:"+id);
+      if(!raw){ SYNC.pendientes.delete(id); continue; }
+      const r = JSON.parse(raw);
+      if(!r.patente && !r.cliente){ SYNC.pendientes.delete(id); continue; }
+      const carpetaId = await carpetaSub(r, "Ficha");
+      await api("/json", { carpetaId, nombre:"ficha.json", contenido:r });
+      SYNC.pendientes.delete(id);
+    }
+    /* Después el índice, fusionado con lo que haya subido otro dispositivo */
+    const carpetaId = await carpetaEstado();
+    const d = await api(`/json?carpetaId=${encodeURIComponent(carpetaId)}&nombre=indice.json`);
+    const m = fusionaIndice(S.indice, d && d.contenido);
+    S.indice = m.lista; S.borradas = m.borradas;
+    await api("/json", { carpetaId, nombre:"indice.json",
+                         contenido:{ v:1, act:Date.now(), lista:S.indice, borradas:S.borradas } });
+    await guardaIndice();
+    SYNC.ultimo = Date.now();
+  }catch(e){ /* se reintenta al volver la señal */ }
+  finally{ SYNC.subiendo = false; }
+}
+
+function marcaParaSubir(id){
+  if(!id) return;
+  SYNC.pendientes.add(id);
+  clearTimeout(marcaParaSubir._t);
+  marcaParaSubir._t = setTimeout(subeArriendos, 1500);
+}
+
+/* Al abrir una ficha que este dispositivo no tiene, se baja de su carpeta */
+async function traeFicha(id){
+  const res = S.indice.find(x=>x.id===id);
+  if(!res || !res.driveCarpeta || !hayDrive() || !navigator.onLine) return null;
+  try{
+    flash("Trayendo la ficha…", true);
+    const { carpetaId } = await api("/carpeta", { ruta:["Ficha"], padreId:res.driveCarpeta });
+    const d = await api(`/json?carpetaId=${encodeURIComponent(carpetaId)}&nombre=ficha.json`);
+    if(d && d.contenido && d.contenido.id === id){
+      await St.set("r:"+id, JSON.stringify(d.contenido));
+      return d.contenido;
+    }
+  }catch(e){}
+  return null;
+}
+
 /* ══════════ FLOTA: ESTADO COMPARTIDO ══════════
    Vehículos y tareas viven en un solo archivo en Drive, para que los dos
    teléfonos vean lo mismo. Se cachea local para trabajar sin señal y se
@@ -1119,7 +1250,7 @@ async function liberaFotosViejas(){
 
 async function tocaTarea(id, cambios){
   const t = FLOTA.tareas.find(x=>x.id===id); if(!t) return null;
-  Object.assign(t, cambios, { act:Date.now() });
+  Object.assign(t, cambios, { act:Date.now(), auto:false });
   await guardaFlota();
   return t;
 }
@@ -1167,27 +1298,47 @@ async function millajeAFlota(r){
    La clave de origen evita duplicar si se cierra el arriendo dos veces. */
 async function danosAFlota(r){
   if(!r.patente) return 0;
-  const yaHay = new Set(FLOTA.tareas.filter(t=>t.origen&&t.origen.clave).map(t=>t.origen.clave));
   const arriendo = nombreCarpeta(r);
-  let n = 0;
+  const previas = new Map(FLOTA.tareas.filter(t=>t.origen&&t.origen.clave).map(t=>[t.origen.clave,t]));
+  const vigentes = new Set();
+  let n = 0, cambio = false;
 
-  const agrega = (clave, titulo, detalle, media) => {
-    if(yaHay.has(clave)) return;
-    nuevaTarea(r.patente, {
-      tipo:"reparacion", titulo, detalle: detalle||"",
-      origen:{ clave, fichaId:r.id, arriendo, carpetaId:r.driveCarpeta||"" },
-      fotos: (media||[]).filter(m=>m.driveId||FOTOS[m.id])
-                        .map(m=>({ id:m.id, nombre:m.nombre||"", driveId:m.driveId||"" })),
-    });
-    yaHay.add(clave); n++;
+  const sincroniza = (clave, titulo, detalle, media) => {
+    vigentes.add(clave);
+    const fotos = (media||[]).filter(m=>m.driveId||FOTOS[m.id])
+                             .map(m=>({ id:m.id, nombre:m.nombre||"", driveId:m.driveId||"" }));
+    const ya = previas.get(clave);
+    if(!ya){
+      FLOTA.tareas.push({ id:uid(), patente:r.patente, tipo:"reparacion",
+        titulo, detalle: detalle||"", estado:"pendiente", auto:true, fotos,
+        origen:{ clave, fichaId:r.id, arriendo, carpetaId:r.driveCarpeta||"" },
+        creado:Date.now(), act:Date.now() });
+      n++; cambio = true;
+      return;
+    }
+    /* Si nadie la editó a mano, se mantiene al día con lo que dice la revisión */
+    if(ya.auto && ya.estado === "pendiente"){
+      const distinto = ya.titulo!==titulo || (ya.detalle||"")!==(detalle||"") ||
+                       (ya.fotos||[]).length !== fotos.length;
+      if(distinto){ ya.titulo=titulo; ya.detalle=detalle||""; ya.fotos=fotos;
+                    ya.origen.carpetaId = r.driveCarpeta||ya.origen.carpetaId;
+                    ya.act=Date.now(); cambio = true; }
+    }
   };
 
-  for(const h of hallazgos(r))
-    agrega(`${r.id}:${h.slot}`, h.t, h.nota, h.media);
+  for(const h of hallazgos(r)) sincroniza(`${r.id}:${h.slot}`, h.t, h.nota, h.media);
+  for(const d of r.danos||[]) sincroniza(`${r.id}:dano:${d.id}`, d.zona || "Daño sin zona", d.desc, d.fotos);
 
-  for(const d of r.danos||[])
-    agrega(`${r.id}:dano:${d.id}`, d.zona || "Daño sin zona", d.desc, d.fotos);
+  /* Un daño desmarcado retira su tarea, salvo que alguien ya la haya tomado */
+  const sobran = FLOTA.tareas.filter(t=>t.origen && t.origen.fichaId===r.id &&
+    t.auto && t.estado==="pendiente" && !vigentes.has(t.origen.clave));
+  if(sobran.length){
+    const ids = new Set(sobran.map(t=>t.id));
+    FLOTA.tareas = FLOTA.tareas.filter(t=>!ids.has(t.id));
+    cambio = true;
+  }
 
+  if(cambio) await guardaFlota();
   return n;
 }
 
@@ -1383,6 +1534,11 @@ function vistaInicio(){
       <button class="btn ghost" data-act="verArchivo">Archivo</button>
       <button class="btn ghost" data-act="ajustes">${hayDrive()?"Drive ✓":"Drive"}</button>
     </div>
+    ${hayDrive()?`<p class="hint" style="margin:6px 0 0">${
+      SYNC.subiendo ? "Sincronizando…"
+      : SYNC.ultimo ? "Al día · "+new Date(SYNC.ultimo).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})
+      : "Sin sincronizar todavía"}${SYNC.pendientes.size?` · ${SYNC.pendientes.size} por subir`:""}
+      <button class="enlace" data-act="sincronizar">Actualizar</button></p>`:""}
     ${S.indice.filter(f=>f.suc===S.suc).length>4?`<input type="text" id="buscar" placeholder="Buscar por patente o cliente" value="${esc(S.q||"")}" style="margin:10px 0">`:""}
 
     ${abiertas.length ? FASES.map(fa=>{
@@ -1616,7 +1772,7 @@ function secDatos(r){
     <label class="f"><span>Cliente</span><input type="text" data-set="cliente" value="${esc(r.cliente)}" placeholder="Nombre y apellido"></label>
     <div class="grid">
       <label class="f"><span>Fecha inicio</span><input type="date" data-set="fi" value="${r.fi}"></label>
-      <label class="f"><span>Fecha término</span><input type="date" data-set="ft" value="${r.ft}"></label>
+      <label class="f"><span>Fecha término</span><input type="date" data-set="ft" value="${r.ft}"${r.fi?` min="${r.fi}"`:""}></label>
     </div>
     <p class="hint">La devolución es a más tardar a las 11:00 del día siguiente a la fecha de término.</p>
     <span style="display:block;font-size:13px;color:var(--gris);margin:12px 0 3px">Adicionales contratados</span>
@@ -1847,7 +2003,8 @@ function slotHTML(s,r){
 }
 function tiraHTML(m,slot,danoId){
   const cuerpo = m.tipo==="foto"
-    ? (FOTOS[m.id]?`<img src="${FOTOS[m.id]}" alt="">`:`<em class="txt">Foto</em>`)
+    ? (FOTOS[m.id] ? `<img src="${FOTOS[m.id]}" alt="">`
+      : m.driveId ? `<em class="txt">Ver en<br>Drive</em>` : `<em class="txt">Foto</em>`)
     : (THUMBS[m.id] ? `<img src="${THUMBS[m.id]}" alt=""><em>Video</em>` : `<em class="txt">Video</em>`);
   const est = m.estado || (m.driveId ? "listo" : "");
   const marca = est==="listo" ? `<i class="ok">✓</i>`
@@ -1863,7 +2020,10 @@ function verMedia(id,slot,danoId){
   const foto=FOTOS[id], m=buscaMedia(id);
   const cuerpo = foto ? `<img src="${foto}" alt="" style="width:100%;border-radius:4px;display:block">`
     : THUMBS[id] ? `<img src="${THUMBS[id]}" alt="" style="width:100%;border-radius:4px;display:block">`
-    : "";
+    : (m && m.driveId && m.tipo==="foto")
+      ? `<a class="btn wide" style="text-decoration:none" target="_blank" rel="noopener"
+           href="https://drive.google.com/file/d/${m.driveId}/view">Abrir la foto en Drive</a>`
+      : "";
   const extra = (m && m.driveId && m.tipo==="video")
     ? `<a class="btn wide" style="margin-top:10px;text-decoration:none"
           href="https://drive.google.com/file/d/${m.driveId}/view" target="_blank" rel="noopener">Reproducir en Drive</a>`
@@ -1934,6 +2094,8 @@ document.addEventListener("click", async ev=>{
 
   switch(d.act){
     case "verArchivo": S.vista="archivo"; pinta(); break;
+    case "sincronizar": flash("Buscando cambios…",true);
+      await bajaArriendos(false); await bajaFlota(true); break;
     case "ajustes": S.vista="ajustes"; pinta(); break;
     case "cerrarIgual": S.forzarCierre=true; cierraModal();
       document.querySelector('[data-act="cerrar"]').click(); break;
@@ -2038,6 +2200,7 @@ document.addEventListener("input", ev=>{
     } return; }
   if(d.tarc){ const t=FLOTA.tareas.find(x=>x.id===S.tarea); if(t){
       t[d.tarc] = d.tarc==="costo" ? (Number(el.value)||0) : el.value;
+      t.auto = false;
       if(d.tarc==="estado" && el.value==="listo" && !t.cerrado) t.cerrado=Date.now();
       if(d.tarc==="estado" && el.value!=="listo") t.cerrado=0;
       t.act=Date.now(); clearTimeout(tmr); tmr=setTimeout(guardaFlota, 500);
@@ -2046,6 +2209,11 @@ document.addEventListener("input", ev=>{
   if(d.set){ const ruta=d.set.split("."); let o=S.r;
     for(let i=0;i<ruta.length-1;i++) o=o[ruta[i]];
     o[ruta.at(-1)]=el.value;
+    if(d.set==="fi"){
+      const ft=document.querySelector('[data-set="ft"]');
+      if(ft){ ft.min = el.value || "";
+        if(ft.value && el.value && ft.value < el.value){ ft.value = el.value; S.r.ft = el.value; } }
+    }
     if(d.set==="suc"||d.set==="patente"){ deb(); pinta(true); return; }
     pintaRail(); pintaPie(); deb(); }
 });
@@ -2055,8 +2223,12 @@ document.addEventListener("blur", e=>{
   if(S.repintarPendiente) setTimeout(()=>{ if(S.repintarPendiente) pinta(true); }, 120);
 }, true);
 document.addEventListener("visibilitychange", ()=>{
-  if(document.hidden){ if(S.r){ clearTimeout(tmr); guardaFicha(); } if(FLOTA_SYNC.sucio) subeFlota(); return; }
+  if(document.hidden){ if(S.r){ clearTimeout(tmr); guardaFicha(); }
+    if(FLOTA_SYNC.sucio) subeFlota();
+    if(SYNC.pendientes.size) subeArriendos();
+    return; }
   if(S.r && S.vista==="ficha" && S.etapa==="entrega") revisaVideosDrive(true);
+  if(S.vista==="inicio") bajaArriendos(true);
 });
 
 function pedirFotoTarea(cam){
