@@ -646,7 +646,24 @@ const COLA = [];              // trabajos de subida
 async function cargaCfg(){
   const raw = await St.get("cfg");
   if(raw){ try{ CFG = {...CFG, ...JSON.parse(raw)}; }catch(e){} }
+  await cfgDesdeEnlace();
 }
+
+/* Un enlace con ?k=clave deja el dispositivo configurado de una */
+async function cfgDesdeEnlace(){
+  try{
+    const p = new URLSearchParams(location.search);
+    const k = p.get("k"), w = p.get("w");
+    if(!k && !w) return;
+    if(w) CFG.url = decodeURIComponent(w);
+    if(k && k !== CFG.clave){ CFG.clave = k; CFG.raizId=""; CFG.huella=""; CFG.estadoId=""; }
+    await guardaCfg();
+    history.replaceState(null, "", location.pathname);   // la clave no queda a la vista
+  }catch(e){}
+}
+const enlaceConfig = () =>
+  location.origin + location.pathname + "?k=" + encodeURIComponent(CFG.clave) +
+  "&w=" + encodeURIComponent(CFG.url);
 async function guardaCfg(){ await St.set("cfg", JSON.stringify(CFG)); }
 
 async function api(ruta, cuerpo){
@@ -1468,6 +1485,10 @@ function vistaAjustes(){
       <input type="password" id="cfgClave" value="${esc(CFG.clave)}" placeholder="La que pusiste en CLAVE_APP"></label>
     <div class="row"><button class="btn acento" id="cfgOk">Guardar</button>
       <button class="btn ghost" id="cfgTest">Probar conexión</button></div>
+    ${hayDrive()?`<div class="ruta" style="margin-top:12px"><span>Enlace configurado</span>
+      <p class="hint" style="margin:0 0 8px">Ábrelo en otro dispositivo y queda conectado sin escribir la clave.
+      Sirve también al instalar la app en la pantalla de inicio, que en iPhone parte en blanco.</p>
+      <button class="btn ghost sm" id="cfgCopiar">Copiar enlace</button></div>`:""}
     <p class="hint" id="cfgEstado">${hayDrive()?"Configurado. Las fotos, videos y documentos se suben solos.":"Sin configurar: todo queda solo en este teléfono."}</p>
   </div></div>
   <div class="card"><h3>Espacio en este dispositivo</h3><div class="pad">
@@ -1500,11 +1521,17 @@ function vistaAjustes(){
     }
     flash(n?`${n} foto(s) liberadas`:"No había nada que liberar"); pinta();
   };
+  const bCopiar=document.getElementById("cfgCopiar");
+  if(bCopiar) bCopiar.onclick=()=>copiar(enlaceConfig(), "Enlace copiado · ábrelo en el otro dispositivo");
   document.getElementById("cfgOk").onclick=async()=>{
     CFG.url=document.getElementById("cfgUrl").value.trim();
     CFG.clave=document.getElementById("cfgClave").value.trim();
-    CFG.raizId=""; CFG.huella=""; S.huella="";
-    await guardaCfg(); flash("Conexión guardada"); pinta();
+    CFG.raizId=""; CFG.huella=""; CFG.estadoId=""; S.huella="";
+    await guardaCfg();
+    flash("Conectado · trayendo datos…", true);
+    await bajaFlota(true); await bajaArriendos(true);
+    S.flota = listaFlota();
+    flash("Conectado y al día"); pinta();
   };
   document.getElementById("cfgTest").onclick=async()=>{
     const e=document.getElementById("cfgEstado");
@@ -1631,8 +1658,10 @@ function vistaInicio(){
 
   app.innerHTML=`
     ${SIN_DISCO?`<div class="aviso"><b>Sin almacenamiento.</b><br>Los datos de esta sesión no se guardarán.</div>`:""}
-    ${hayDrive()?"":`<div class="aviso"><b>Drive sin conectar.</b><br>Las fotos quedan solo en este dispositivo.
-      <button class="btn ghost sm" data-act="ajustes" style="margin-top:8px">Conectar</button></div>`}
+    ${hayDrive()?"":`<div class="aviso"><b>Este dispositivo no está conectado a Drive.</b><br>
+      No ve los arriendos ni la flota de los demás, y lo que hagas aquí queda solo en él.
+      ${location.search?"":"<br>Si ya lo configuraste en otro lado, pide el enlace desde Ajustes → Copiar enlace."}
+      <button class="btn ghost sm" data-act="ajustes" style="margin-top:8px">Conectar ahora</button></div>`}
     ${(alertas.length||proximos.length)?`<details class="desplegable aviso-doc">
       <summary>${alertas.length?`<b>${alertas.length} máquina(s) con documentos vencidos</b>`:""}${
         alertas.length&&proximos.length?" · ":""}${proximos.length?`${proximos.length} por vencer`:""}</summary>
