@@ -663,8 +663,34 @@ async function trabaja(t){
       if(intento<3) await new Promise(r=>setTimeout(r, intento*2500));
     }
   }
+  const llego = await verificaEnDrive(t);
+  if(llego){ t.media.estado="listo"; t.media.driveId=llego; t.media.pct=100; delete t.media.detalle; return; }
   t.media.estado="error";
   flash("No se pudo subir: "+t.media.detalle);
+}
+
+/* El aviso de error puede ser falso: en móvil la conexión se corta justo al
+   terminar y el archivo ya quedó en Drive. Antes de marcar error, se mira. */
+async function verificaEnDrive(t){
+  try{
+    const r = S.r && S.r.id===t.fichaId ? S.r : JSON.parse(await St.get("r:"+t.fichaId));
+    const d = destino(r, t.slot, t.danoId);
+    const carpetaId = (r.driveSubs||{})[d.sub];
+    if(!carpetaId) return "";
+    const lista = await api("/listar?carpetaId="+encodeURIComponent(carpetaId));
+    const esperado = nombreArchivo(r, t, d);
+    const f = (lista.files||[]).find(x=>x.name===esperado);
+    return f ? f.id : "";
+  }catch(e){ return ""; }
+}
+
+/* Un solo lugar decide cómo se llama el archivo, para que la verificación
+   busque exactamente el mismo nombre que usó la subida. */
+function nombreArchivo(r, t, d){
+  const lista = t.danoId ? ((r.danos.find(x=>x.id===t.danoId)||{}).fotos||[]) : (r.media[t.slot]||[]);
+  const i = Math.max(0, lista.findIndex(m=>m.id===t.id));
+  const ext = EXT(t.media.nombre) || (t.media.tipo==="video" ? "mp4" : "jpg");
+  return `${d.base}${i?"-"+(i+1):""}.${ext}`;
 }
 
 /* PUT con progreso real. XHR permite seguir el avance del envío, fetch no. */
@@ -690,10 +716,7 @@ async function subeArchivo(t){
   if(!blob) throw new Error("El archivo ya no está en memoria");
 
   const d = destino(r, t.slot, t.danoId);
-  const lista = t.danoId ? ((r.danos.find(x=>x.id===t.danoId)||{}).fotos||[]) : (r.media[t.slot]||[]);
-  const i = Math.max(0, lista.findIndex(m=>m.id===t.id));
-  const ext = EXT(t.media.nombre) || (t.media.tipo==="video" ? "mp4" : "jpg");
-  const nombre = `${d.base}${i?"-"+(i+1):""}.${ext}`;
+  const nombre = nombreArchivo(r, t, d);
 
   const carpetaId = await carpetaSub(r, d.sub);
   const { subidaUrl } = await api("/sesion", {
@@ -748,9 +771,12 @@ async function carpetaRaiz(){
   const fp = await huellaDestino();
   if(fp && CFG.huella !== fp){ CFG.raizId=""; CFG.huella=fp; await guardaCfg(); }
   if(CFG.raizId) return CFG.raizId;
-  const { carpetaId } = await api("/carpeta", { ruta:[RAIZ] });
-  CFG.raizId = carpetaId; await guardaCfg();
-  return carpetaId;
+  return unaVez("raiz", async()=>{
+    if(CFG.raizId) return CFG.raizId;
+    const { carpetaId } = await api("/carpeta", { ruta:[RAIZ] });
+    CFG.raizId = carpetaId; await guardaCfg();
+    return carpetaId;
+  });
 }
 async function carpetaArriendo(r){
   const fp = await huellaDestino();
@@ -759,21 +785,35 @@ async function carpetaArriendo(r){
     if(S.r && S.r.id===r.id){ delete S.r.driveCarpeta; delete S.r.driveSubs; delete S.r.driveVids; }
   }
   if(r.driveCarpeta) return r.driveCarpeta;
-  const padreId = await carpetaRaiz();
-  const { carpetaId } = await api("/carpeta", { ruta:[nombreCarpeta(r)], padreId });
-  r.driveCarpeta = carpetaId; r.driveHuella = await huellaDestino();
-  if(S.r && S.r.id===r.id){ S.r.driveCarpeta = carpetaId; S.r.driveHuella = r.driveHuella; }
-  return carpetaId;
+  return unaVez(`arr|${r.id}`, async()=>{
+    if(r.driveCarpeta) return r.driveCarpeta;
+    const padreId = await carpetaRaiz();
+    const { carpetaId } = await api("/carpeta", { ruta:[nombreCarpeta(r)], padreId });
+    r.driveCarpeta = carpetaId; r.driveHuella = await huellaDestino();
+    if(S.r && S.r.id===r.id){ S.r.driveCarpeta = carpetaId; S.r.driveHuella = r.driveHuella; }
+    return carpetaId;
+  });
 }
 /* Los ids se guardan en la ficha para no volver a buscarlos en cada archivo */
+const EN_VUELO = new Map();
+function unaVez(clave, fn){
+  if(EN_VUELO.has(clave)) return EN_VUELO.get(clave);
+  const p = fn().finally(()=>EN_VUELO.delete(clave));
+  EN_VUELO.set(clave, p);
+  return p;
+}
+
 async function carpetaSub(r, sub){
   r.driveSubs = r.driveSubs || {};
   if(r.driveSubs[sub]) return r.driveSubs[sub];
-  const padreId = await carpetaArriendo(r);
-  const { carpetaId } = await api("/carpeta", { ruta:[sub], padreId });
-  r.driveSubs[sub] = carpetaId;
-  if(S.r && S.r.id===r.id){ S.r.driveSubs = S.r.driveSubs||{}; S.r.driveSubs[sub]=carpetaId; }
-  return carpetaId;
+  return unaVez(`${r.id}|${sub}`, async()=>{
+    if(r.driveSubs[sub]) return r.driveSubs[sub];
+    const padreId = await carpetaArriendo(r);
+    const { carpetaId } = await api("/carpeta", { ruta:[sub], padreId });
+    r.driveSubs[sub] = carpetaId;
+    if(S.r && S.r.id===r.id){ S.r.driveSubs = S.r.driveSubs||{}; S.r.driveSubs[sub]=carpetaId; }
+    return carpetaId;
+  });
 }
 const linkCarpeta = id => id ? `https://drive.google.com/drive/folders/${id}` : "";
 
@@ -868,6 +908,8 @@ function vigilaVideos(){
     if(!(S.vista==="ficha" && S.etapa==="entrega" && S.r)){ clearInterval(RELOJ); RELOJ=null; return; }
     if(cuentaVideos(S.r) >= SLOTS_VIDEO.length){ clearInterval(RELOJ); RELOJ=null; return; }
     if(!navigator.onLine || S.revisando || document.hidden) return;
+    const f = document.activeElement;
+    if(f && /^(INPUT|TEXTAREA|SELECT)$/.test(f.tagName||"")) return;   // alguien está escribiendo
     revisaVideosDrive(true);
   }, 20000);
 }
@@ -1226,6 +1268,14 @@ function vistaAjustes(){
 /* ══════════ PINTADO ══════════ */
 const app=document.getElementById("app");
 function pinta(keep){
+  /* Redibujar destruye el campo con foco y el teclado se cierra solo.
+     Si alguien está escribiendo, el repintado espera a que termine. */
+  const foco = document.activeElement;
+  if(keep && foco && /^(INPUT|TEXTAREA|SELECT)$/.test(foco.tagName||"")){
+    S.repintarPendiente = true;
+    return;
+  }
+  S.repintarPendiente = false;
   const y = keep ? window.scrollY : 0;
   document.getElementById("sucSw").innerHTML = (S.vista==="ficha"&&S.r)
     ? `<span class="suc-fija">${esc(S.r.suc)}</span>`
@@ -2000,7 +2050,10 @@ document.addEventListener("input", ev=>{
     pintaRail(); pintaPie(); deb(); }
 });
 function deb(){ clearTimeout(tmr); tmr=setTimeout(guardaFicha,600); }
-document.addEventListener("blur", e=>{ if(S.r && e.target.dataset && (e.target.dataset.set||e.target.dataset.dano)){ clearTimeout(tmr); guardaFicha(); } }, true);
+document.addEventListener("blur", e=>{
+  if(S.r && e.target.dataset && (e.target.dataset.set||e.target.dataset.dano)){ clearTimeout(tmr); guardaFicha(); }
+  if(S.repintarPendiente) setTimeout(()=>{ if(S.repintarPendiente) pinta(true); }, 120);
+}, true);
 document.addEventListener("visibilitychange", ()=>{
   if(document.hidden){ if(S.r){ clearTimeout(tmr); guardaFicha(); } if(FLOTA_SYNC.sucio) subeFlota(); return; }
   if(S.r && S.vista==="ficha" && S.etapa==="entrega") revisaVideosDrive(true);
