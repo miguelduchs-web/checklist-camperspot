@@ -421,9 +421,6 @@ async function bootstrap(){
   S.flota = ordenaFlota(S.flota);
   await St.set("flota", JSON.stringify(S.flota));
   await cargaFlota();
-  S.flota.forEach(v=>{
-    FLOTA.veh[v.patente] = FLOTA.veh[v.patente] ? {...v, ...FLOTA.veh[v.patente]} : {...v, act:0};
-  });
   S.flota = listaFlota();
   setTimeout(liberaFotosViejas, 4000);
   const ix = await St.get("indice");
@@ -1242,7 +1239,7 @@ const tTipo   = k => (TIPOS.find(x=>x.k===k)||{t:"Otro"}).t;
 const tEstado = k => (ESTADOS.find(x=>x.k===k)||{t:"Pendiente"}).t;
 
 let FLOTA = { v:1, act:0, veh:{}, tareas:[], bajas:{} };
-let FLOTA_SYNC = { subiendo:false, sucio:false, ultimo:0 };
+let FLOTA_SYNC = { subiendo:false, sucio:false, ultimo:0, error:"" };
 
 const listaFlota = () => ordenaFlota(Object.values(FLOTA.veh||{}));
 const tareasDe = (patente, estado) => FLOTA.tareas
@@ -1295,20 +1292,31 @@ async function cargaFlota(){
   const raw = await St.get("flotaEstado");
   if(raw){ try{ FLOTA = JSON.parse(raw); }catch(e){} }
   FLOTA.veh = FLOTA.veh || {}; FLOTA.tareas = FLOTA.tareas || []; FLOTA.bajas = FLOTA.bajas || {};
-  await bajaFlota(true);
+  const bajo = await bajaFlota(true);
+  /* Los vehículos de fábrica solo se siembran si no hay nada en ninguna parte.
+     Si la descarga falló, se espera: rellenar traería fechas viejas como buenas. */
+  if(!Object.keys(FLOTA.veh).length && (bajo || !hayDrive())){
+    FLOTA_BASE.forEach(v=>{ FLOTA.veh[v.patente] = {...v, act:Date.now()}; });
+    await guardaFlota();
+  }
 }
 
 async function bajaFlota(silencioso){
-  if(!hayDrive() || !navigator.onLine) return;
+  if(!hayDrive() || !navigator.onLine) return false;
   try{
     const d = await api("/estado");
     if(d && d.contenido) FLOTA = fusiona(FLOTA, d.contenido);
-    FLOTA_SYNC.ultimo = Date.now();
+    FLOTA_SYNC.ultimo = Date.now(); FLOTA_SYNC.error = "";
     await St.set("flotaEstado", JSON.stringify(FLOTA));
     if(FLOTA_SYNC.sucio) await subeFlota();
     if(!silencioso) flash("Flota actualizada");
     if(S.vista==="flota"||S.vista==="vehiculo") pinta(true);
-  }catch(e){ if(!silencioso) flash("No se pudo leer la flota: "+corta(e.message)); }
+    return true;
+  }catch(e){
+    FLOTA_SYNC.error = corta(e.message||e);
+    if(!silencioso) flash("No se pudo leer la flota: "+FLOTA_SYNC.error);
+    return false;
+  }
 }
 
 async function guardaFlota(){
@@ -1632,12 +1640,14 @@ function vistaArchivo(){
    : `<div class="vacio"><p>Todavía no hay arriendos archivados.</p></div>`}`;
 }
 
-/* Verde cuando todo está en Drive, ámbar cuando algo falta por subir */
+/* Mira arriendos y flota: decir "todo respaldado" mirando solo una mitad
+   es peor que no decir nada, porque da confianza sin fundamento. */
 function nivelSync(){
   if(!navigator.onLine) return "espera";
-  if(SYNC.subiendo) return "espera";
-  if(SYNC.pendientes.size) return "pendiente";
-  return SYNC.ultimo ? "ok" : "pendiente";
+  if(SYNC.subiendo || FLOTA_SYNC.subiendo) return "espera";
+  if(SYNC.pendientes.size || FLOTA_SYNC.sucio) return "pendiente";
+  if(FLOTA_SYNC.error) return "pendiente";
+  return (SYNC.ultimo && FLOTA_SYNC.ultimo) ? "ok" : "pendiente";
 }
 
 function vistaInicio(){
@@ -1679,10 +1689,12 @@ function vistaInicio(){
     ${hayDrive()?`<div class="estado-sync" data-nivel="${nivelSync()}">
       ${(()=>{ const n=SYNC.pendientes.size;
         if(!navigator.onLine) return `<b>Sin conexión</b> ${n?`${n} arriendo(s) esperando para subir.`:"Lo que hagas se sube al volver la señal."}`;
-        if(SYNC.subiendo) return `<b>Subiendo a Drive…</b>`;
+        if(SYNC.subiendo || FLOTA_SYNC.subiendo) return `<b>Subiendo a Drive…</b>`;
+        if(FLOTA_SYNC.error) return `<b>La flota no se pudo leer</b> ${esc(FLOTA_SYNC.error)}`;
         if(n) return `<b>${n} arriendo(s) sin respaldar</b> Están solo en este dispositivo.`;
-        if(!SYNC.ultimo) return `<b>Sin respaldar todavía</b> Toca Actualizar para sincronizar con Drive.`;
-        return `<b>Todo respaldado en Drive</b> Última vez a las ${new Date(SYNC.ultimo).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})}.`;
+        if(FLOTA_SYNC.sucio) return `<b>Cambios de flota sin subir</b> Están solo en este dispositivo.`;
+        if(!SYNC.ultimo || !FLOTA_SYNC.ultimo) return `<b>Sin sincronizar todavía</b> Toca Actualizar para traer lo que hay en Drive.`;
+        return `<b>Todo respaldado en Drive</b> Arriendos y flota, a las ${new Date(Math.min(SYNC.ultimo,FLOTA_SYNC.ultimo)).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})}.`;
       })()}
       <button class="enlace" data-act="sincronizar">Actualizar ahora</button>
     </div>`:""}
@@ -2259,8 +2271,14 @@ document.addEventListener("click", async ev=>{
                 pinta(); flash("Se trajo la versión del otro dispositivo"); }
       else flash("No se pudo traer la otra versión");
       break; }
-    case "sincronizar": flash("Buscando cambios…",true);
-      await bajaArriendos(false); await bajaFlota(true); break;
+    case "sincronizar": {
+      flash("Buscando cambios…",true);
+      const okF = await bajaFlota(true);
+      await bajaArriendos(false);
+      S.flota = listaFlota();
+      if(!okF && hayDrive()) flash("La flota no se pudo leer: "+(FLOTA_SYNC.error||"revisa la conexión"));
+      pinta(true);
+      break; }
     case "ajustes": S.vista="ajustes"; pinta(); break;
     case "cerrarIgual": S.forzarCierre=true; cierraModal();
       document.querySelector('[data-act="cerrar"]').click(); break;
