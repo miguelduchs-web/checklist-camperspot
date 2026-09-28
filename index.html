@@ -1057,7 +1057,7 @@ function buscaMedia(id){
    completa en su propia carpeta. Así cualquier dispositivo ve los mismos
    arriendos, y el teléfono solo descarga la ficha que va a abrir. */
 
-let SYNC = { subiendo:false, ultimo:0, pendientes:new Set() };
+let SYNC = { subiendo:false, ultimo:0, pendientes:new Set(), error:"" };
 
 async function carpetaEstado(){
   if(CFG.estadoId) return CFG.estadoId;
@@ -1107,89 +1107,63 @@ async function bajaArriendos(silencioso){
     const r = fusionaIndice(S.indice, d && d.contenido);
     S.indice = r.lista; S.borradas = r.borradas;
     await guardaIndice();
-    SYNC.ultimo = Date.now();
+    SYNC.ultimo = Date.now(); SYNC.error = "";
     if(SYNC.pendientes.size) subeArriendos();
     const nuevos = S.indice.length - antes;
     if(!silencioso) flash(nuevos>0 ? `${nuevos} arriendo(s) nuevo(s)` : "Al día");
     if(S.vista==="inicio"||S.vista==="archivo") pinta(true);
-  }catch(e){ if(!silencioso) flash("No se pudo sincronizar: "+corta(e.message)); }
+  }catch(e){
+    SYNC.error = corta(e.message||e);
+    if(!silencioso) flash("No se pudo sincronizar: "+SYNC.error);
+  }
 }
 
 async function subeArriendos(){
-  if(!hayDrive() || !navigator.onLine || SYNC.subiendo) return;
+  if(!hayDrive() || !navigator.onLine || SYNC.subiendo) return false;
   SYNC.subiendo = true;
+  const subidos = [];          // no se descuentan hasta que el índice quede escrito
   try{
-    /* Primero cada ficha marcada, en su propia carpeta */
     const carpetaId = await carpetaEstado();
     const d = await api(`/json?carpetaId=${encodeURIComponent(carpetaId)}&nombre=indice.json`);
     const remoto = new Map(((d&&d.contenido&&d.contenido.lista)||[]).map(f=>[f.id,f]));
 
     for(const id of [...SYNC.pendientes]){
       const raw = await St.get("r:"+id);
-      if(!raw){ SYNC.pendientes.delete(id); continue; }
+      if(!raw){ subidos.push(id); continue; }
       const r = JSON.parse(raw);
-      if(!r.patente && !r.cliente){ SYNC.pendientes.delete(id); continue; }
+      if(!r.patente && !r.cliente){ subidos.push(id); continue; }
 
       /* Alguien más guardó esta misma ficha después de que la abrimos:
          no se pisa en silencio, se avisa y se deja decidir. */
       const suyo = remoto.get(id);
       if(suyo && S.r && S.r.id===id && S.baseAct && suyo.act > S.baseAct && suyo.act > (r.act||0)){
-        SYNC.pendientes.delete(id);
+        subidos.push(id);
         avisaChoque(id, suyo);
         continue;
       }
       const carpFicha = await carpetaSub(r, "Ficha");
       await api("/json", { carpetaId:carpFicha, nombre:"ficha.json", contenido:r });
-      SYNC.pendientes.delete(id);
+      subidos.push(id);
     }
+
     const m = fusionaIndice(S.indice, d && d.contenido);
     S.indice = m.lista; S.borradas = m.borradas;
+
+    /* El índice es lo que el otro dispositivo lee: si esto falla, nada se dio
+       por subido. Antes se descontaba la ficha aquí arriba y el aviso quedaba
+       en verde con el índice sin escribir. */
     await api("/json", { carpetaId, nombre:"indice.json",
                          contenido:{ v:1, act:Date.now(), lista:S.indice, borradas:S.borradas } });
+
+    subidos.forEach(id=>SYNC.pendientes.delete(id));
     await guardaIndice();
-    SYNC.ultimo = Date.now();
-  }catch(e){ /* se reintenta al volver la señal */ }
+    SYNC.ultimo = Date.now(); SYNC.error = "";
+    return true;
+  }catch(e){
+    SYNC.error = corta(e.message||e);          // las fichas siguen pendientes y se reintentan
+    return false;
+  }
   finally{ SYNC.subiendo = false; }
-}
-
-/* Dos personas en la misma ficha a la vez. Poco probable con este volumen,
-   pero si pasa conviene que se note en vez de perder trabajo en silencio. */
-let CHOQUE_AVISADO = 0;
-function avisaChoque(id, suyo){
-  if(Date.now() - CHOQUE_AVISADO < 60000) return;
-  CHOQUE_AVISADO = Date.now();
-  modal(`<h3>Alguien más editó este arriendo</h3>
-    <p style="margin:0 0 10px">Se guardó una versión desde otro dispositivo mientras tenías esta abierta.
-    Para no perder ninguno de los dos trabajos, tus cambios no se subieron todavía.</p>
-    <div class="aviso" style="margin:0 0 12px"><b>${esc(suyo.carpeta||"")}</b><br>
-      Guardado a las ${new Date(suyo.act).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})}
-      desde otro dispositivo.</div>
-    <div class="row">
-      <button class="btn acento" data-act="ganarYo" style="flex:1">Subir lo mío igual</button>
-      <button class="btn ghost" data-act="traerSuyo" style="flex:1">Traer lo del otro</button>
-    </div>`);
-}
-
-/* Si algo queda sin subir, se reintenta solo hasta lograrlo. Sin esto,
-   una falla pasajera dejaba el arriendo solo en el teléfono sin avisar. */
-let REINTENTO = null;
-function vigilaRespaldo(){
-  clearInterval(REINTENTO);
-  REINTENTO = setInterval(()=>{
-    if(document.hidden) return;
-    if(!navigator.onLine || !hayDrive()) return;
-    if(SYNC.pendientes.size && !SYNC.subiendo) subeArriendos();
-    if(FLOTA_SYNC.sucio && !FLOTA_SYNC.subiendo) subeFlota();
-    /* También se baja cada tanto: si el otro dispositivo agregó algo,
-       conviene que aparezca sin tener que apretar nada. */
-    if(!SYNC.subiendo && !SYNC.pendientes.size && Date.now()-(SYNC.ultimo||0) > 90000){
-      bajaArriendos(true); bajaFlota(true);
-    }
-    if(S.vista==="inicio"){
-      const e=document.querySelector(".estado-sync");
-      if(e) pinta(true);
-    }
-  }, 30000);
 }
 
 function marcaParaSubir(id){
@@ -1702,7 +1676,7 @@ function nivelSync(){
   if(!navigator.onLine) return "espera";
   if(SYNC.subiendo || FLOTA_SYNC.subiendo) return "espera";
   if(SYNC.pendientes.size || FLOTA_SYNC.sucio) return "pendiente";
-  if(FLOTA_SYNC.error) return "pendiente";
+  if(FLOTA_SYNC.error || SYNC.error) return "pendiente";
   return (SYNC.ultimo && FLOTA_SYNC.ultimo) ? "ok" : "pendiente";
 }
 
@@ -1746,6 +1720,7 @@ function vistaInicio(){
       ${(()=>{ const n=SYNC.pendientes.size;
         if(!navigator.onLine) return `<b>Sin conexión</b> ${n?`${n} arriendo(s) esperando para subir.`:"Lo que hagas se sube al volver la señal."}`;
         if(SYNC.subiendo || FLOTA_SYNC.subiendo) return `<b>Subiendo a Drive…</b>`;
+        if(SYNC.error) return `<b>No se pudo respaldar</b> ${esc(SYNC.error)}`;
         if(FLOTA_SYNC.error) return `<b>La flota no se pudo leer</b> ${esc(FLOTA_SYNC.error)}`;
         if(n) return `<b>${n} arriendo(s) sin respaldar</b> Están solo en este dispositivo.`;
         if(FLOTA_SYNC.sucio) return `<b>Cambios de flota sin subir</b> Están solo en este dispositivo.`;
