@@ -107,6 +107,8 @@ button.slot.tarea:active{background:var(--salvia-pal)}
 .slot p{margin:0 0 9px;font-size:13px;color:var(--gris)}
 .btn{-webkit-user-select:none;user-select:none;display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid var(--oliva);background:var(--oliva);color:#fff;border-radius:4px;padding:11px 15px;font-family:"Barlow Condensed";font-weight:600;font-size:16px;min-height:46px}
 .btn.ghost{background:#fff;color:var(--tinta)}
+.btn.borrar-fi{border-color:#E2C3BD;color:var(--dano)}
+.btn.borrar-fi:active{background:#F5E1DD}
 .btn.acento{background:var(--ambar);border-color:var(--ambar-osc);color:#2E2A06;
   box-shadow:0 1px 0 var(--ambar-osc)}
 .btn.acento:active{background:var(--ambar-osc);box-shadow:none;transform:translateY(1px)}
@@ -493,7 +495,8 @@ async function borraFicha(id){
   }
   await St.del("r:"+id);
   S.indice=S.indice.filter(x=>x.id!==id); await guardaIndice();
-  S.vista="inicio"; S.r=null; pinta(); flash("Ficha eliminada");
+  if(S.r && S.r.id===id){ S.r=null; S.original=null; S.vista="inicio"; }
+  pinta(); flash("Arriendo eliminado");
 }
 
 /* ══════════ IMÁGENES ══════════ */
@@ -1261,15 +1264,19 @@ function vistaArchivo(){
   const fs=S.indice.slice().sort((a,b)=>(b.carpeta||"").localeCompare(a.carpeta||""));
   app.innerHTML=`<div class="row" style="margin:14px 0"><button class="btn ghost" data-act="inicio">Volver</button></div>
   <h2 class="tit" style="font-size:22px;margin:0 0 4px">Archivo</h2>
-  <p class="hint" style="margin:0 0 14px">Carpetas en Drive, de la más reciente a la más antigua. Cada una tiene Videos, Ficha y Daños.</p>
+  <p class="hint" style="margin:0 0 14px">Todos los arriendos, del más reciente al más antiguo. Desde aquí puedes abrir su carpeta en Drive o eliminarlos de este dispositivo.</p>
   ${fs.length? `<div class="card"><ul class="arch" style="padding:6px 14px">
     ${fs.map(f=>`<li style="padding:9px 0">
       <code>${esc(f.carpeta||"—")}</code>
       <small>${esc(f.cliente||"sin cliente")} · ${f.estado==="cerrado"?"cerrada":"en curso"}</small>
-      ${f.driveCarpeta
-        ? `<a class="btn ghost sm" style="margin-top:6px;text-decoration:none" target="_blank" rel="noopener"
-             href="https://drive.google.com/drive/folders/${f.driveCarpeta}">Abrir en Drive</a>`
-        : `<span class="badge warn" style="margin-top:6px">Sin respaldo</span>`}
+      <div class="row" style="margin-top:6px">
+        ${f.driveCarpeta
+          ? `<a class="btn ghost sm" style="text-decoration:none" target="_blank" rel="noopener"
+               href="https://drive.google.com/drive/folders/${f.driveCarpeta}">Abrir en Drive</a>`
+          : `<span class="badge warn">Sin respaldo</span>`}
+        <button class="btn ghost sm" data-abre="${f.id}">Abrir ficha</button>
+        <button class="btn ghost sm" data-borrafi="${f.id}" style="margin-left:auto">Eliminar</button>
+      </div>
     </li>`).join("")}
     </ul></div>`
    : `<div class="vacio"><p>Todavía no hay arriendos archivados.</p></div>`}`;
@@ -1503,11 +1510,11 @@ function vistaFicha(){
       <button class="btn ghost sm" data-act="ajustes" style="margin-top:8px">Conectar ahora</button></div>`}
     <div class="row" style="margin:14px 0 2px">
       <button class="btn ghost sm" data-act="volver" aria-label="Salir sin guardar">‹ Salir</button>
+      <button class="btn ghost sm borrar-fi" data-act="borrar" style="margin-left:auto">Eliminar</button>
     </div>`
     + secciones[S.etapa](r)
     + (ix===ETAPAS.length-1
-       ? `<div class="row" style="margin:16px 0"><button class="btn wide" data-act="cerrar">${r.estado==="cerrado"?"Reabrir arriendo":"Cerrar arriendo"}</button></div>
-          <div class="row" style="margin:0 0 20px"><button class="btn ghost sm" data-act="borrar">Eliminar este arriendo</button></div>`
+       ? `<div class="row" style="margin:16px 0"><button class="btn wide" data-act="cerrar">${r.estado==="cerrado"?"Reabrir arriendo":"Cerrar arriendo"}</button></div>`
        : "");
 }
 
@@ -1558,7 +1565,8 @@ function secDatos(r){
       : datosListos(r)
         ? `<p class="hint"><span class="badge warn">Creando carpeta en Drive…</span></p>`
         : `<p class="hint">La carpeta de Drive se crea sola al completar patente, cliente y fechas.</p>`) : ""}
-  </div></div>`;
+  </div></div>
+`;
 }
 
 function secPrep(r){
@@ -1822,6 +1830,10 @@ document.addEventListener("click", async ev=>{
     S.etapa=ETAPAS[i].k; S.r.ultimaEtapa=S.etapa; await guardaFicha(true); pinta();
     if(S.etapa==="entrega") alistaVideos(); return; }
   if(d.abre){ await abreFicha(d.abre); return; }
+  if(d.borrafi){ const f=S.indice.find(x=>x.id===d.borrafi)||{};
+    confirmar(`Se elimina ${f.carpeta||"esta ficha"} de este dispositivo, con sus fotos locales. Lo que está en Drive no se toca.`,
+      async()=>{ await borraFicha(d.borrafi); S.vista="archivo"; pinta(); }, "Eliminar");
+    return; }
   if(d.chk!=null){ S.r.prep[d.chk]=!S.r.prep[d.chk];
     t.setAttribute("aria-pressed",!!S.r.prep[d.chk]); pintaRail(); pintaPie(); guardaFicha(); return; }
   if(d.vehabrir){ S.veh=d.vehabrir; S.verHist=10; S.vista="vehiculo"; pinta(); bajaFlota(true); return; }
