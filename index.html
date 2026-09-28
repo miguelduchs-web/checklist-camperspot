@@ -81,6 +81,14 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid v
 .hint{font-size:13px;color:var(--gris);margin:6px 0 0}
 button.enlace{background:none;border:0;padding:0 0 0 6px;color:var(--oliva-cl);font-size:13px;
   text-decoration:underline;font-family:inherit}
+.estado-sync{margin:10px 0 0;padding:9px 11px;border-radius:4px;font-size:13px;line-height:1.4;
+  border:1px solid var(--linea);background:#FBFCF8;color:var(--gris)}
+.estado-sync b{display:block;font-family:"Barlow Condensed";font-size:15px;font-weight:600}
+.estado-sync[data-nivel=ok]{background:#EDF4E3;border-color:#C9DCAE}
+.estado-sync[data-nivel=ok] b{color:var(--ok)}
+.estado-sync[data-nivel=pendiente]{background:#FBF0D6;border-color:#E0C692}
+.estado-sync[data-nivel=pendiente] b{color:#7A5409}
+.estado-sync[data-nivel=espera] b{color:var(--oliva)}
 h2.tit{color:var(--oliva);text-transform:uppercase;letter-spacing:.03em}
 
 /* ---------- items ---------- */
@@ -423,6 +431,7 @@ async function bootstrap(){
   const bo = await St.get("borradas");
   S.borradas = bo ? JSON.parse(bo) : [];
   bajaArriendos(true);
+  vigilaRespaldo();
   pinta();
 }
 async function guardaIndice(){
@@ -1123,6 +1132,22 @@ function avisaChoque(id, suyo){
     </div>`);
 }
 
+/* Si algo queda sin subir, se reintenta solo hasta lograrlo. Sin esto,
+   una falla pasajera dejaba el arriendo solo en el teléfono sin avisar. */
+let REINTENTO = null;
+function vigilaRespaldo(){
+  clearInterval(REINTENTO);
+  REINTENTO = setInterval(()=>{
+    if(document.hidden) return;
+    if(SYNC.pendientes.size && navigator.onLine && hayDrive() && !SYNC.subiendo) subeArriendos();
+    if(FLOTA_SYNC.sucio && navigator.onLine && hayDrive() && !FLOTA_SYNC.subiendo) subeFlota();
+    if(S.vista==="inicio"){
+      const e=document.querySelector(".estado-sync");
+      if(e) pinta(true);
+    }
+  }, 30000);
+}
+
 function marcaParaSubir(id){
   if(!id) return;
   SYNC.pendientes.add(id);
@@ -1547,6 +1572,14 @@ function vistaArchivo(){
    : `<div class="vacio"><p>Todavía no hay arriendos archivados.</p></div>`}`;
 }
 
+/* Verde cuando todo está en Drive, ámbar cuando algo falta por subir */
+function nivelSync(){
+  if(!navigator.onLine) return "espera";
+  if(SYNC.subiendo) return "espera";
+  if(SYNC.pendientes.size) return "pendiente";
+  return SYNC.ultimo ? "ok" : "pendiente";
+}
+
 function vistaInicio(){
   const q=(S.q||"").toLowerCase().trim();
   const todas=S.indice.filter(f=>f.suc===S.suc)
@@ -1581,11 +1614,16 @@ function vistaInicio(){
       <button class="btn ghost" data-act="verArchivo">Archivo</button>
       <button class="btn ghost" data-act="ajustes">${hayDrive()?"Drive ✓":"Drive"}</button>
     </div>
-    ${hayDrive()?`<p class="hint" style="margin:6px 0 0">${
-      SYNC.subiendo ? "Sincronizando…"
-      : SYNC.ultimo ? "Al día · "+new Date(SYNC.ultimo).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})
-      : "Sin sincronizar todavía"}${SYNC.pendientes.size?` · ${SYNC.pendientes.size} por subir`:""}
-      <button class="enlace" data-act="sincronizar">Actualizar</button></p>`:""}
+    ${hayDrive()?`<div class="estado-sync" data-nivel="${nivelSync()}">
+      ${(()=>{ const n=SYNC.pendientes.size;
+        if(!navigator.onLine) return `<b>Sin conexión</b> ${n?`${n} arriendo(s) esperando para subir.`:"Lo que hagas se sube al volver la señal."}`;
+        if(SYNC.subiendo) return `<b>Subiendo a Drive…</b>`;
+        if(n) return `<b>${n} arriendo(s) sin respaldar</b> Están solo en este dispositivo.`;
+        if(!SYNC.ultimo) return `<b>Sin respaldar todavía</b> Toca Actualizar para sincronizar con Drive.`;
+        return `<b>Todo respaldado en Drive</b> Última vez a las ${new Date(SYNC.ultimo).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})}.`;
+      })()}
+      <button class="enlace" data-act="sincronizar">Actualizar ahora</button>
+    </div>`:""}
     ${S.indice.filter(f=>f.suc===S.suc).length>4?`<input type="text" id="buscar" placeholder="Buscar por patente o cliente" value="${esc(S.q||"")}" style="margin:10px 0">`:""}
 
     ${abiertas.length ? FASES.map(fa=>{
