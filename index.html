@@ -837,7 +837,7 @@ async function huellaDestino(){
 }
 async function carpetaRaiz(){
   const fp = await huellaDestino();
-  if(fp && CFG.huella !== fp){ CFG.raizId=""; CFG.huella=fp; await guardaCfg(); }
+  if(fp && CFG.huella !== fp){ CFG.raizId=""; CFG.estadoId=""; CFG.huella=fp; await guardaCfg(); }
   if(CFG.raizId) return CFG.raizId;
   return unaVez("raiz", async()=>{
     if(CFG.raizId) return CFG.raizId;
@@ -1177,8 +1177,14 @@ function vigilaRespaldo(){
   clearInterval(REINTENTO);
   REINTENTO = setInterval(()=>{
     if(document.hidden) return;
-    if(SYNC.pendientes.size && navigator.onLine && hayDrive() && !SYNC.subiendo) subeArriendos();
-    if(FLOTA_SYNC.sucio && navigator.onLine && hayDrive() && !FLOTA_SYNC.subiendo) subeFlota();
+    if(!navigator.onLine || !hayDrive()) return;
+    if(SYNC.pendientes.size && !SYNC.subiendo) subeArriendos();
+    if(FLOTA_SYNC.sucio && !FLOTA_SYNC.subiendo) subeFlota();
+    /* También se baja cada tanto: si el otro dispositivo agregó algo,
+       conviene que aparezca sin tener que apretar nada. */
+    if(!SYNC.subiendo && !SYNC.pendientes.size && Date.now()-(SYNC.ultimo||0) > 90000){
+      bajaArriendos(true); bajaFlota(true);
+    }
     if(S.vista==="inicio"){
       const e=document.querySelector(".estado-sync");
       if(e) pinta(true);
@@ -1488,6 +1494,47 @@ async function traspasaAFlota(r){
   return partes.join(" · ");
 }
 
+async function diagSync(){
+  const L=[];
+  L.push("Dispositivo: "+(window.matchMedia("(display-mode: standalone)").matches?"app instalada":"navegador"));
+  L.push("Drive configurado: "+(hayDrive()?"sí":"no"));
+  L.push("Arriendos en este dispositivo: "+S.indice.length);
+  L.push("Esperando subir: "+SYNC.pendientes.size);
+  L.push("Bajas registradas: "+((S.borradas||[]).length));
+  L.push("");
+  try{
+    const p=await api("/ping");
+    L.push("Worker: "+(p.version||"?")+" · unidad "+(p.unidad||"?"));
+    L.push("Carpeta base: "+(p.raiz||"?"));
+  }catch(e){ L.push("Worker no responde: "+corta(e.message)); }
+  L.push("");
+  try{
+    const carpetaId = await carpetaEstado();
+    L.push("Carpeta de estado: "+carpetaId);
+    const d = await api(`/json?carpetaId=${encodeURIComponent(carpetaId)}&nombre=indice.json`);
+    if(!d || !d.existe){ L.push("indice.json: NO EXISTE en Drive"); }
+    else if(!d.contenido){ L.push("indice.json: existe pero no se pudo leer"); }
+    else {
+      const lista = d.contenido.lista||[];
+      L.push("indice.json: "+lista.length+" arriendo(s) · guardado "+(d.modificado||"?"));
+      lista.slice(0,12).forEach(f=>L.push("  · "+(f.carpeta||f.id)+" ["+(f.cliente||"sin cliente")+"]"));
+      const bor = d.contenido.borradas||[];
+      if(bor.length) L.push("  bajas en Drive: "+bor.length);
+      const soloAca = S.indice.filter(a=>!lista.some(b=>b.id===a.id));
+      const soloAlla = lista.filter(b=>!S.indice.some(a=>a.id===b.id));
+      if(soloAca.length) L.push("SOLO AQUÍ (sin subir): "+soloAca.map(f=>f.carpeta||f.id).join(", "));
+      if(soloAlla.length) L.push("SOLO EN DRIVE (sin bajar): "+soloAlla.map(f=>f.carpeta||f.id).join(", "));
+      if(!soloAca.length && !soloAlla.length) L.push("Coinciden: este dispositivo y Drive tienen lo mismo.");
+    }
+  }catch(e){ L.push("Error leyendo el índice: "+corta(e.message)); }
+
+  const txt=L.join("\n");
+  modal(`<h3>Diagnóstico de sincronización</h3><pre class="res">${esc(txt)}</pre>
+    <div class="row" style="margin-top:10px">
+      <button class="btn acento" data-act="forzarSubida" style="flex:1">Forzar subida de todo</button>
+    </div>`);
+}
+
 /* ══════════ AJUSTES ══════════ */
 function vistaAjustes(){
   app.innerHTML=`<div class="row" style="margin:14px 0"><button class="btn ghost" data-act="inicio">Volver</button></div>
@@ -1503,6 +1550,7 @@ function vistaAjustes(){
       <p class="hint" style="margin:0 0 8px">Ábrelo en otro dispositivo y queda conectado sin escribir la clave.
       Sirve también al instalar la app en la pantalla de inicio, que en iPhone parte en blanco.</p>
       <button class="btn ghost sm" id="cfgCopiar">Copiar enlace</button></div>`:""}
+    <div class="row" style="margin-top:10px"><button class="btn ghost sm" id="cfgDiag">Diagnóstico de sincronización</button></div>
     <p class="hint" id="cfgEstado">${hayDrive()?"Configurado. Las fotos, videos y documentos se suben solos.":"Sin configurar: todo queda solo en este teléfono."}</p>
   </div></div>
   <div class="card"><h3>Espacio en este dispositivo</h3><div class="pad">
@@ -1535,6 +1583,8 @@ function vistaAjustes(){
     }
     flash(n?`${n} foto(s) liberadas`:"No había nada que liberar"); pinta();
   };
+  const bDiag=document.getElementById("cfgDiag");
+  if(bDiag) bDiag.onclick=async()=>{ flash("Consultando Drive…",true); await diagSync(); };
   const bCopiar=document.getElementById("cfgCopiar");
   if(bCopiar) bCopiar.onclick=()=>copiar(enlaceConfig(), "Enlace copiado · ábrelo en el otro dispositivo");
   document.getElementById("cfgOk").onclick=async()=>{
@@ -2281,6 +2331,13 @@ document.addEventListener("click", async ev=>{
                 pinta(); flash("Se trajo la versión del otro dispositivo"); }
       else flash("No se pudo traer la otra versión");
       break; }
+    case "forzarSubida":
+      cierraModal();
+      S.indice.forEach(f=>SYNC.pendientes.add(f.id));
+      flash("Subiendo todo…",true);
+      await subeArriendos();
+      flash(SYNC.pendientes.size ? "Quedaron "+SYNC.pendientes.size+" sin subir" : "Todo subido");
+      pinta(true); break;
     case "sincronizar": {
       flash("Buscando cambios…",true);
       const okF = await bajaFlota(true);
