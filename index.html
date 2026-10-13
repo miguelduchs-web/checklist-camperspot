@@ -181,6 +181,11 @@ section.bloque h2.tit{font-size:20px;margin:0 0 2px;display:flex;align-items:cen
 .pie .salir{white-space:nowrap}
 .pie .est{color:var(--salvia-cl);font-size:12px;flex:1;min-width:0;text-align:center;overflow:hidden}
 .pie .est b{color:#fff;display:block;font-family:"Barlow Condensed";font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Cuando falta subir algo, el centro del pie es un botón: se nota y se toca */
+.pie .est-btn{appearance:none;-webkit-appearance:none;font:inherit;cursor:pointer;
+  border:1px solid var(--salvia);border-radius:9px;background:rgba(149,170,113,.18);
+  padding:3px 8px;min-height:34px;color:var(--salvia-cl)}
+.pie .est-btn:active{background:rgba(149,170,113,.34)}
 @media(max-width:470px){
   .pie{padding:5px 10px calc(5px + env(safe-area-inset-bottom))}
   .pie-in{gap:5px}
@@ -188,6 +193,9 @@ section.bloque h2.tit{font-size:20px;margin:0 0 2px;display:flex;align-items:cen
   .pie .salir{padding:0 10px;min-height:34px;font-size:13px}
   .pie .est{font-size:0;line-height:0}
   .pie .est b{font-size:13px;line-height:1.2}
+  /* el aviso de "falta subir" sí debe leerse en el teléfono */
+  .pie .est-btn{font-size:10px;line-height:1.1;padding:2px 6px}
+  .pie .est-btn b{font-size:12px}
 }
 
 /* ---------- modal ---------- */
@@ -1076,7 +1084,11 @@ function resumenDe(r){
   return { id:r.id, suc:r.suc, patente:r.patente, cliente:r.cliente, fi:r.fi, ft:r.ft,
            estado:r.estado, act:r.act||Date.now(), pct:Math.round(n/t*100),
            mes:mesDe(r), carpeta:nombreCarpeta(r), fase:faseDe(r).k,
-           driveCarpeta:r.driveCarpeta||"" };
+           driveCarpeta:r.driveCarpeta||"",
+           /* nombre REAL de la carpeta en Drive, que puede ir atrasado respecto
+              de "carpeta" si el renombrado aún no se completó. Sin esto, otro
+              dispositivo busca un nombre que todavía no existe. */
+           driveNombre:r.driveNombre||"" };
 }
 
 function fusionaIndice(local, remoto){
@@ -1182,6 +1194,7 @@ function vigilaRespaldo(){
       bajaArriendos(true); bajaFlota(true);
     }
     if(S.vista==="inicio" && document.querySelector(".estado-sync")) pinta(true);
+    if(S.vista==="ficha" && S.r) pintaPie();   // el pie muestra si falta subir
   }, 30000);
 }
 
@@ -1203,11 +1216,52 @@ function avisaChoque(id, suyo){
     </div>`);
 }
 
+/* La subida se agrupa 1,5 s para no llamar a Drive en cada tecla, pero con
+   techo: si alguien edita sin pausas, igual se sube a los 8 s. Antes el
+   temporizador se reiniciaba con cada cambio y podía postergarse sin fin. */
 function marcaParaSubir(id){
   if(!id) return;
   SYNC.pendientes.add(id);
+  if(!marcaParaSubir._desde) marcaParaSubir._desde = Date.now();
+  if(Date.now() - marcaParaSubir._desde > 8000){
+    clearTimeout(marcaParaSubir._t);
+    marcaParaSubir._desde = 0;
+    subeArriendos();
+    return;
+  }
   clearTimeout(marcaParaSubir._t);
-  marcaParaSubir._t = setTimeout(subeArriendos, 1500);
+  marcaParaSubir._t = setTimeout(()=>{ marcaParaSubir._desde = 0; subeArriendos(); }, 1500);
+}
+
+/* Guardado explícito: guarda aquí y sube a Drive de inmediato, sin esperar
+   ningún temporizador, y devuelve lo que realmente pasó. Es lo que usan el
+   botón Guardar, Guardar y salir, y el cierre o minimizado de la app.
+   Nunca decimos "guardado" a secas cuando solo quedó en el dispositivo. */
+async function guardaYSube(){
+  if(!S.r) return { local:false, drive:false, motivo:"sin ficha" };
+  /* No archivar una ficha vacía: antes bastaba guardar para crear un
+     arriendo fantasma que aparecía en los otros dispositivos. */
+  if(!S.indice.some(x=>x.id===S.r.id) && !tieneContenido(S.r))
+    return { local:false, drive:false, motivo:"vacía" };
+  S.r.ultimaEtapa = S.etapa;
+  clearTimeout(marcaParaSubir._t);
+  marcaParaSubir._desde = 0;
+  await guardaFicha(true);
+  clearTimeout(marcaParaSubir._t);          // guardaFicha reprogramó el temporizador
+  const local = S.indice.some(x=>x.id===S.r.id);
+  if(!hayDrive())        return { local, drive:false, motivo:"sin Drive" };
+  if(!navigator.onLine)  return { local, drive:false, motivo:"sin conexión" };
+  const ok = await subeArriendos();
+  return { local, drive:!!ok, motivo: ok ? "" : (SYNC.error || "falló la subida") };
+}
+
+/* El texto que corresponde al resultado de guardaYSube */
+function avisoGuardado(res, alSalir){
+  if(!res.local) return "No había nada que guardar";
+  if(res.drive)  return alSalir ? "Guardado y subido a Drive" : "Subido a Drive";
+  if(res.motivo==="sin conexión") return "Guardado aquí · se sube solo al volver la conexión";
+  if(res.motivo==="sin Drive")    return "Guardado solo en este dispositivo";
+  return "Guardado aquí · aún no sube a Drive: "+res.motivo;
 }
 
 /* Al abrir una ficha que este dispositivo no tiene, se baja de su carpeta */
@@ -1216,20 +1270,40 @@ async function traeFicha(id){
   if(!res || !hayDrive() || !navigator.onLine) return null;
   try{
     flash("Trayendo la ficha…", true);
-    /* Si el índice no trae la carpeta, se busca por su nombre en la raíz */
-    let padre = res.driveCarpeta;
-    if(!padre && res.carpeta){
-      const raizId = await carpetaRaiz();
-      const lista = await api("/listar?carpetaId="+encodeURIComponent(raizId));
-      const c = (lista.files||[]).find(f=>f.name===res.carpeta);
-      padre = c && c.id;
-    }
-    if(!padre) return null;
-    const { carpetaId } = await api("/carpeta", { ruta:["Ficha"], padreId:padre });
-    const d = await api(`/json?carpetaId=${encodeURIComponent(carpetaId)}&nombre=ficha.json`);
-    if(d && d.contenido && d.contenido.id === id){
+    /* Varias formas de ubicar la carpeta, de la más directa a la más tolerante.
+       El nombre de la carpeta incluye el cliente, así que cambia cuando alguien
+       corrige el nombre: no se puede depender de que calce exacto. El prefijo
+       fecha_PATENTE sí es estable, y la ficha se verifica por id, de modo que
+       un candidato equivocado se descarta en vez de devolver datos ajenos. */
+    const intenta = async padre => {
+      if(!padre) return null;
+      const { carpetaId } = await api("/carpeta", { ruta:["Ficha"], padreId:padre });
+      const d = await api(`/json?carpetaId=${encodeURIComponent(carpetaId)}&nombre=ficha.json`);
+      if(!(d && d.contenido && d.contenido.id === id)) return null;   // candidato ajeno
+      d.contenido.driveCarpeta = padre;
       await St.set("r:"+id, JSON.stringify(d.contenido));
+      const i = S.indice.findIndex(x=>x.id===id);
+      if(i>=0){ S.indice[i].driveCarpeta = padre; await guardaIndice(); }
       return d.contenido;
+    };
+    /* 1) la carpeta anotada en el índice: el camino normal, una sola llamada */
+    const directo = await intenta(res.driveCarpeta);
+    if(directo) return directo;
+    /* 2) por nombre. El nombre lleva el cliente, así que cambia cuando alguien
+          lo corrige y puede no calzar; el prefijo fecha_PATENTE_ sí es estable. */
+    const raizId = await carpetaRaiz();
+    const files = (await api("/listar?carpetaId="+encodeURIComponent(raizId))).files || [];
+    const cand = [];
+    for(const n of [res.driveNombre, res.carpeta])
+      if(n) for(const f of files) if(f.name === n) cand.push(f.id);
+    const partes = String(res.carpeta||"").split("_");
+    if(partes.length >= 2){
+      const pref = partes[0]+"_"+partes[1]+"_";
+      for(const f of files) if(f.name.startsWith(pref)) cand.push(f.id);
+    }
+    for(const padre of [...new Set(cand)].slice(0,6)){
+      const hallada = await intenta(padre);
+      if(hallada) return hallada;
     }
   }catch(e){}
   return null;
@@ -1684,14 +1758,30 @@ function pintaPieVeh(){
 }
 
 function pintaPie(){
-  const[n,t]=progTotal(S.r), p=Math.round(n/t*100);
-  const g=!S.indice.some(x=>x.id===S.r.id) ? "Se guarda al escribir"
-    : S.guardado ? "Guardado "+new Date(S.guardado).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"}) : "Guardada";
   const ix=ETAPAS.findIndex(e=>e.k===S.etapa);
   const[en,et]=prog(S.r,S.etapa);
+  const existe = S.indice.some(x=>x.id===S.r.id);
+  const porSubir = SYNC.pendientes.has(S.r.id);
+  /* El centro del pie dice la verdad sobre Drive y, cuando falta subir algo,
+     es un botón: así se puede confirmar sin tener que salir de la ficha. */
+  let centro;
+  if(pendientes())
+    centro = `<div class="est"><b>${ETAPAS[ix].t} · ${en}/${et}</b>Subiendo ${pendientes()} archivo(s)…</div>`;
+  else if(!existe)
+    centro = `<div class="est"><b>${ETAPAS[ix].t} · ${en}/${et}</b>Se guarda al escribir</div>`;
+  else if(SYNC.subiendo)
+    centro = `<div class="est"><b>${ETAPAS[ix].t} · ${en}/${et}</b>Subiendo a Drive…</div>`;
+  else if(porSubir || !hayDrive())
+    centro = `<button class="est est-btn" data-act="guardarYa">
+        <b>${ETAPAS[ix].t} · ${en}/${et}</b>${hayDrive()
+          ? (navigator.onLine ? "Falta subir · toca para guardar" : "Sin conexión · toca para reintentar")
+          : "Solo en este dispositivo"}</button>`;
+  else
+    centro = `<div class="est"><b>${ETAPAS[ix].t} · ${en}/${et}</b>En Drive${
+      SYNC.ultimo?" · "+new Date(SYNC.ultimo).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"}):""}</div>`;
   document.getElementById("pieIn").innerHTML=`
     <button class="nav" data-nav="-1" ${ix<=0?"disabled":""} aria-label="Etapa anterior">‹</button>
-    <div class="est"><b>${ETAPAS[ix].t} · ${en}/${et}</b>${pendientes()?`Subiendo ${pendientes()} archivo(s)…`:g}</div>
+    ${centro}
     <button class="nav" data-nav="1" ${ix>=ETAPAS.length-1?"disabled":""} aria-label="Etapa siguiente">›</button>
     <button class="btn acento sm salir" data-act="salir">Guardar y salir</button>`;
 }
@@ -2377,6 +2467,12 @@ document.addEventListener("click", async ev=>{
       break; }
     case "ajustes": S.vista="ajustes"; pinta(); break;
     case "irInicio": S.vista="inicio"; S.r=null; S.veh=null; pinta(); break;
+    case "guardarYa": {
+      if(!S.r) break;
+      flash("Guardando…", true);
+      const res = await guardaYSube();
+      pintaPie(); flash(avisoGuardado(res, false));
+      break; }
     case "cerrarIgual": S.forzarCierre=true; cierraModal();
       document.querySelector('[data-act="cerrar"]').click(); break;
     case "salirVeh":
@@ -2422,10 +2518,13 @@ document.addEventListener("click", async ev=>{
         S.original=null; S.vista="inicio"; S.r=null; pinta();
         flash("No había nada que guardar"); break;
       }
-      if(S.r){ S.r.ultimaEtapa=S.etapa; await guardaFicha(true); }
-      const guardada = S.r && S.indice.some(x=>x.id===S.r.id);
+      /* Se sube a Drive ANTES de soltar la ficha. Antes esto solo guardaba
+         en el teléfono y la subida quedaba en un temporizador que moría al
+         cerrar la app: decía "guardado" y nunca llegaba a los otros equipos. */
+      flash("Guardando…", true);
+      const res = await guardaYSube();
       S.original=null; S.vista="inicio"; S.r=null; pinta();
-      flash(guardada?"Cambios guardados":"Ficha en blanco descartada");
+      flash(res.local ? avisoGuardado(res, true) : "Ficha en blanco descartada");
       break; }
     case "volver":
       if(pendientes()) { flash("Espera a que terminen las subidas"); break; }
@@ -2533,14 +2632,26 @@ document.addEventListener("blur", e=>{
   if(S.r && e.target.dataset && (e.target.dataset.set||e.target.dataset.dano)){ clearTimeout(tmr); guardaFicha(); }
   if(S.repintarPendiente) setTimeout(()=>{ if(S.repintarPendiente) pinta(true); }, 120);
 }, true);
+/* Al minimizar o cerrar hay que guardar Y subir, en ese orden y esperando.
+   Antes se llamaba a subeArriendos() antes de que guardaFicha() terminara,
+   así que subía el estado anterior y los últimos cambios se perdían. */
+async function alOcultar(){
+  clearTimeout(tmr);
+  clearTimeout(marcaParaSubir._t);
+  marcaParaSubir._desde = 0;
+  if(S.r) await guardaFicha(true);
+  clearTimeout(marcaParaSubir._t);
+  if(FLOTA_SYNC.sucio) await subeFlota();
+  if(SYNC.pendientes.size) await subeArriendos();
+}
 document.addEventListener("visibilitychange", ()=>{
-  if(document.hidden){ if(S.r){ clearTimeout(tmr); guardaFicha(); }
-    if(FLOTA_SYNC.sucio) subeFlota();
-    if(SYNC.pendientes.size) subeArriendos();
-    return; }
+  if(document.hidden){ alOcultar(); return; }
   if(S.r && S.vista==="ficha" && S.etapa==="entrega") revisaVideosDrive(true);
   if(S.vista==="inicio") bajaArriendos(true);
+  if(S.vista==="ficha" && S.r) pintaPie();
 });
+/* En iPhone, al cerrar la app web solo llega pagehide, no visibilitychange */
+window.addEventListener("pagehide", ()=>{ alOcultar(); });
 
 function pedirFotoTarea(cam){
   const inp=document.createElement("input");
