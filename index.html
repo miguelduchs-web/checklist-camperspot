@@ -1166,6 +1166,43 @@ async function subeArriendos(){
   finally{ SYNC.subiendo = false; }
 }
 
+/* Si algo queda sin subir, se reintenta solo hasta lograrlo. Sin esto,
+   una falla pasajera dejaba el arriendo solo en el teléfono sin avisar. */
+let REINTENTO = null;
+function vigilaRespaldo(){
+  clearInterval(REINTENTO);
+  REINTENTO = setInterval(()=>{
+    if(document.hidden) return;
+    if(!navigator.onLine || !hayDrive()) return;
+    if(SYNC.pendientes.size && !SYNC.subiendo) subeArriendos();
+    if(FLOTA_SYNC.sucio && !FLOTA_SYNC.subiendo) subeFlota();
+    /* También se baja cada tanto: si el otro dispositivo agregó algo,
+       conviene que aparezca sin tener que apretar nada. */
+    if(!SYNC.subiendo && !SYNC.pendientes.size && Date.now()-(SYNC.ultimo||0) > 90000){
+      bajaArriendos(true); bajaFlota(true);
+    }
+    if(S.vista==="inicio" && document.querySelector(".estado-sync")) pinta(true);
+  }, 30000);
+}
+
+/* Dos personas en la misma ficha a la vez. Poco probable con este volumen,
+   pero si pasa conviene que se note en vez de perder trabajo en silencio. */
+let CHOQUE_AVISADO = 0;
+function avisaChoque(id, suyo){
+  if(Date.now() - CHOQUE_AVISADO < 60000) return;
+  CHOQUE_AVISADO = Date.now();
+  modal(`<h3>Alguien más editó este arriendo</h3>
+    <p style="margin:0 0 10px">Se guardó una versión desde otro dispositivo mientras tenías esta abierta.
+    Para no perder ninguno de los dos trabajos, tus cambios no se subieron todavía.</p>
+    <div class="aviso" style="margin:0 0 12px"><b>${esc(suyo.carpeta||"")}</b><br>
+      Guardado a las ${new Date(suyo.act).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})}
+      desde otro dispositivo.</div>
+    <div class="row">
+      <button class="btn acento" data-act="ganarYo" style="flex:1">Subir lo mío igual</button>
+      <button class="btn ghost" data-act="traerSuyo" style="flex:1">Traer lo del otro</button>
+    </div>`);
+}
+
 function marcaParaSubir(id){
   if(!id) return;
   SYNC.pendientes.add(id);
@@ -1606,12 +1643,24 @@ function pinta(keep){
   else if(S.vista==="vehiculo"&&FLOTA.veh[S.veh]){ rail.hidden=true; pie.hidden=false; pintaPieVeh(); }
   else { rail.hidden=true; pie.hidden=true; }
   pintaConexion();
-  if(S.vista==="inicio") vistaInicio();
-  else if(S.vista==="flota") vistaFlota();
-  else if(S.vista==="archivo") vistaArchivo();
-  else if(S.vista==="ajustes") vistaAjustes();
-  else if(S.vista==="vehiculo") vistaVehiculo();
-  else vistaFicha();
+  /* Red de seguridad: si una vista falla, muestra el motivo y una salida.
+     Nunca más una pantalla en blanco sin explicación. */
+  try{
+    if(S.vista==="inicio") vistaInicio();
+    else if(S.vista==="flota") vistaFlota();
+    else if(S.vista==="archivo") vistaArchivo();
+    else if(S.vista==="ajustes") vistaAjustes();
+    else if(S.vista==="vehiculo") vistaVehiculo();
+    else vistaFicha();
+  }catch(e){
+    console.error("Falló la vista "+S.vista, e);
+    document.getElementById("app").innerHTML = `
+      <div class="aviso"><b>No se pudo mostrar esta pantalla.</b><br>
+        Tus datos están a salvo. Avísale a Miguel con este detalle:<br>
+        <code style="font-size:12px;word-break:break-word">${esc(S.vista)} · ${esc(String(e&&e.message||e))}</code>
+      </div>
+      <button class="btn acento" data-act="irInicio" style="width:100%">Volver al inicio</button>`;
+  }
   if(keep) window.scrollTo(0,y); else window.scrollTo({top:0});
 }
 function pintaRail(){
@@ -1849,7 +1898,12 @@ function vistaVehiculo(){
     </ul></div>`:""}`;
 }
 
-const diaDe = ms => fecha(new Date(ms).toISOString().slice(0,10));
+/* Tolera fechas ausentes o inválidas: antes una sola tarea sin fecha
+   dejaba en blanco toda la vista del vehículo. */
+const diaDe = ms => {
+  const d = new Date(ms);
+  return isNaN(d.getTime()) ? "—" : fecha(d.toISOString().slice(0,10));
+};
 
 function tareaFila(t){
   const orig = t.origen && t.origen.arriendo;
@@ -2322,6 +2376,7 @@ document.addEventListener("click", async ev=>{
       pinta(true);
       break; }
     case "ajustes": S.vista="ajustes"; pinta(); break;
+    case "irInicio": S.vista="inicio"; S.r=null; S.veh=null; pinta(); break;
     case "cerrarIgual": S.forzarCierre=true; cierraModal();
       document.querySelector('[data-act="cerrar"]').click(); break;
     case "salirVeh":
