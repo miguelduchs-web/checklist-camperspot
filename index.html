@@ -1113,16 +1113,22 @@ function fusionaIndice(local, remoto){
 async function bajaArriendos(silencioso){
   if(!hayDrive() || !navigator.onLine) return;
   try{
-    const carpetaId = await carpetaEstado();
-    const d = await api(`/json?carpetaId=${encodeURIComponent(carpetaId)}&nombre=indice.json`);
+    /* /indice resuelve la carpeta en el servidor, así que todos los
+       dispositivos leen el mismo archivo pase lo que pase con su caché. */
+    const d = await api("/indice");
     const antes = S.indice.length;
     const r = fusionaIndice(S.indice, d && d.contenido);
     S.indice = r.lista; S.borradas = r.borradas;
     await guardaIndice();
     SYNC.ultimo = Date.now(); SYNC.error = "";
+    /* Si en Drive todavía no hay índice y aquí sí hay arriendos, este
+       dispositivo es el que tiene los datos: hay que subirlos, no callar. */
+    if(!(d && d.contenido) && S.indice.length)
+      S.indice.forEach(f=>SYNC.pendientes.add(f.id));
     if(SYNC.pendientes.size) subeArriendos();
     const nuevos = S.indice.length - antes;
-    if(!silencioso) flash(nuevos>0 ? `${nuevos} arriendo(s) nuevo(s)` : "Al día");
+    if(!silencioso) flash(nuevos>0 ? `${nuevos} arriendo(s) nuevo(s)`
+      : (d && d.contenido) ? "Al día" : "En Drive no hay índice todavía · subiendo lo de aquí");
     if(S.vista==="inicio"||S.vista==="archivo") pinta(true);
   }catch(e){
     SYNC.error = corta(e.message||e);
@@ -1130,13 +1136,26 @@ async function bajaArriendos(silencioso){
   }
 }
 
+/* Si ya hay una subida en vuelo, esta llamada la ESPERA en vez de darse por
+   fallida. Antes devolvía false sin error y el botón Guardar informaba
+   "no subió" cuando en realidad la subida estaba en curso. */
+let SUBIDA_EN_VUELO = null;
 async function subeArriendos(){
-  if(!hayDrive() || !navigator.onLine || SYNC.subiendo) return false;
+  if(!hayDrive() || !navigator.onLine) return false;
+  if(SUBIDA_EN_VUELO){
+    try{ await SUBIDA_EN_VUELO; }catch(e){}
+    if(!SYNC.pendientes.size) return !SYNC.error;   // la otra subida se llevó todo
+  }
+  if(SYNC.subiendo) return false;
+  SUBIDA_EN_VUELO = subeArriendosYa();
+  try{ return await SUBIDA_EN_VUELO; }
+  finally{ SUBIDA_EN_VUELO = null; }
+}
+async function subeArriendosYa(){
   SYNC.subiendo = true;
   const subidos = [];          // no se descuentan hasta que el índice quede escrito
   try{
-    const carpetaId = await carpetaEstado();
-    const d = await api(`/json?carpetaId=${encodeURIComponent(carpetaId)}&nombre=indice.json`);
+    const d = await api("/indice");            // la carpeta la resuelve el servidor
     const remoto = new Map(((d&&d.contenido&&d.contenido.lista)||[]).map(f=>[f.id,f]));
 
     for(const id of [...SYNC.pendientes]){
@@ -1164,8 +1183,7 @@ async function subeArriendos(){
     /* El índice es lo que el otro dispositivo lee: si esto falla, nada se dio
        por subido. Antes se descontaba la ficha aquí arriba y el aviso quedaba
        en verde con el índice sin escribir. */
-    await api("/json", { carpetaId, nombre:"indice.json",
-                         contenido:{ v:1, act:Date.now(), lista:S.indice, borradas:S.borradas } });
+    await api("/indice", { contenido:{ v:1, act:Date.now(), lista:S.indice, borradas:S.borradas } });
 
     subidos.forEach(id=>SYNC.pendientes.delete(id));
     await guardaIndice();
@@ -1594,14 +1612,23 @@ async function diagSync(){
   }catch(e){ L.push("Worker no responde: "+corta(e.message)); }
   L.push("");
   try{
-    const carpetaId = await carpetaEstado();
-    L.push("Carpeta de estado: "+carpetaId);
-    const d = await api(`/json?carpetaId=${encodeURIComponent(carpetaId)}&nombre=indice.json`);
-    if(!d || !d.existe){ L.push("indice.json: NO EXISTE en Drive"); }
-    else if(!d.contenido){ L.push("indice.json: existe pero no se pudo leer"); }
+    /* Lo que el SERVIDOR ve. Si dos equipos muestran distinto aquí,
+       están mirando carpetas distintas y eso explica cualquier desajuste. */
+    try{
+      const g = await api("/diagnostico");
+      L.push("Carpeta raíz (servidor): "+g.raizId);
+      L.push("Carpeta de estado (servidor): "+g.estadoId);
+      if(g.raicesDuplicadas>1) L.push("⚠ HAY "+g.raicesDuplicadas+" carpetas raíz con el mismo nombre");
+      if(g.flotasDuplicadas>1) L.push("⚠ HAY "+g.flotasDuplicadas+" carpetas _Flota duplicadas");
+      L.push("Según el servidor · índice: "+(g.indice?g.indice.arriendos+" arriendo(s)":"no existe")
+             +" · flota: "+(g.flota?g.flota.vehiculos+" vehículo(s), "+g.flota.tareas+" tarea(s)":"no existe"));
+    }catch(e){ L.push("Diagnóstico del servidor no disponible: "+corta(e.message)
+                      +" (¿falta actualizar el Worker?)"); }
+    const d = await api("/indice");
+    if(!d || !d.contenido){ L.push("indice.json: NO EXISTE en Drive"); }
     else {
       const lista = d.contenido.lista||[];
-      L.push("indice.json: "+lista.length+" arriendo(s) · guardado "+(d.modificado||"?"));
+      L.push("indice.json: "+lista.length+" arriendo(s)");
       lista.slice(0,12).forEach(f=>L.push("  · "+(f.carpeta||f.id)+" ["+(f.cliente||"sin cliente")+"]"));
       const bor = d.contenido.borradas||[];
       if(bor.length) L.push("  bajas en Drive: "+bor.length);
