@@ -332,13 +332,17 @@ const REV_CR = [
    carpetas en Drive y las filas de la base. */
 const TIPOS_VEH = {
   mh: { etiqueta:"MH", nombre:"Motorhome",    prep:PREP_MH, rev:REV_MH,
-        millaje:true,  mantencion:true,  tablero:true },
+        millaje:true,  mantencion:true,  tablero:true,  bencina:true },
   cr: { etiqueta:"CR", nombre:"Casa rodante", prep:PREP_CR, rev:REV_CR,
-        millaje:false, mantencion:false, tablero:false },
+        millaje:false, mantencion:false, tablero:false, bencina:false },
 };
 const tipoDe    = pat => (typeof FLOTA!=="undefined" && FLOTA.veh[pat] && FLOTA.veh[pat].tipo)
                          || (FLOTA_BASE.find(v=>v.patente===pat)||{}).tipo || "mh";
-const cfgTipo   = r => TIPOS_VEH[tipoDe(r && r.patente)] || TIPOS_VEH.mh;
+/* La ficha guarda su propio tipo al elegir la patente. Antes se consultaba
+   la flota cada vez, así que si un equipo todavía no tenía el tipo del
+   vehículo leía la MISMA ficha con otro checklist: distinto porcentaje y
+   distinta etapa en cada dispositivo. Ahora la ficha se describe sola. */
+const cfgTipo   = r => TIPOS_VEH[(r && r.tipo) || tipoDe(r && r.patente)] || TIPOS_VEH.mh;
 const etiquetaPat = pat => pat ? (TIPOS_VEH[tipoDe(pat)]||TIPOS_VEH.mh).etiqueta+": "+pat : "";
 const gruposRev = r => cfgTipo(r).rev;
 
@@ -454,7 +458,7 @@ function prog(r,et){
     gruposRev(r).forEach(g=>itemsRev(g,r).forEach(x=>{ tot++; if(r.rev[x.k]) n++; }));
     return [n, tot||1];
   }
-  const c=[...(cfg.millaje?[r.reporte.km]:[]), r.reporte.bencina, r.reporte.gas];
+  const c=[...(cfg.millaje?[r.reporte.km]:[]), ...(cfg.bencina?[r.reporte.bencina]:[]), r.reporte.gas];
   return [c.filter(Boolean).length, c.length];
 }
 function faseDe(r){
@@ -600,6 +604,14 @@ async function abreFicha(id){
      la ficha, así que navegar entre pestañas contaba como editar y le subía
      la versión a todos: quien estuviera trabajando quedaba desactualizado y
      su guardado terminaba rechazado. */
+  /* Una ficha creada antes de que existieran los tipos adopta el suyo al
+     abrirse, y desde ahí viaja con ella en el próximo guardado. Solo se sella
+     si la flota ya dice qué tipo es: sellar a ciegas fijaría un tipo
+     equivocado justo en el equipo que todavía no recibió el vehículo.
+     Y NO se marca para subir: eso la dejaría "pendiente" por el solo hecho
+     de abrirla, y una ficha pendiente deja de recibir los cambios del otro. */
+  if(!S.r.tipo && S.r.patente && FLOTA.veh[S.r.patente] && FLOTA.veh[S.r.patente].tipo)
+    S.r.tipo = FLOTA.veh[S.r.patente].tipo;
   const etapaLocal = await St.get("etapa:"+id);
   const recordada = etapaLocal || S.r.ultimaEtapa || "";
   if(recordada==="entrega") setTimeout(alistaVideos,300);
@@ -1565,6 +1577,16 @@ async function cargaFlota(){
     FLOTA_BASE.forEach(v=>{ FLOTA.veh[v.patente] = {...v, act:0, provisional:true}; });
     await St.set("flotaEstado", JSON.stringify(FLOTA));   // local, sin subir
   }
+  /* Un vehículo guardado antes de que existieran los tipos, o creado a mano
+     sin elegirlo, queda sin tipo. Se le pone el de la lista de fábrica si lo
+     conocemos; si no, motorhome, que es lo que había hasta ahora. */
+  let arreglados = 0;
+  for(const v of Object.values(FLOTA.veh)){
+    if(v.tipo) continue;
+    v.tipo = (FLOTA_BASE.find(x=>x.patente===v.patente)||{}).tipo || "mh";
+    if(!v.provisional){ v.sucio = true; arreglados++; }
+  }
+  if(arreglados){ await St.set("flotaEstado", JSON.stringify(FLOTA)); subeFlota(); }
 }
 
 async function bajaFlotaDrive(silencioso){
@@ -2536,6 +2558,9 @@ function vistaVehiculo(){
     <div class="grid">
       <label class="f"><span>Sucursal base</span><select data-veh="${v.patente}" data-c="suc">
         ${SUCURSALES.map(x=>`<option ${v.suc===x?"selected":""}>${x}</option>`).join("")}</select></label>
+      <label class="f"><span>Tipo</span><select data-veh="${v.patente}" data-c="tipo">
+        ${Object.entries(TIPOS_VEH).map(([k,c])=>
+          `<option value="${k}" ${(v.tipo||"mh")===k?"selected":""}>${c.nombre}</option>`).join("")}</select></label>
       ${!TIPOS_VEH[v.tipo||"mh"].millaje ? "" :
       `<label class="f"><span>Millaje actual</span><input type="number" inputmode="numeric" data-veh="${v.patente}" data-c="km" value="${esc(v.km||"")}" placeholder="Ej: 189603"></label>`}
     </div>
@@ -2928,12 +2953,12 @@ function secReporte(r){
   <div class="card"><h3>Cierre</h3><div class="pad">
     <div class="grid">
       ${cfgTipo(r).millaje ? `<label class="f"><span>Millaje de llegada</span><input type="number" inputmode="numeric" data-set="reporte.km" value="${esc(r.reporte.km)}" placeholder="Ej: 190450"></label>` : ""}
-      <label class="f"><span>Uso de millaje</span><input type="text" id="usoKm" value="${km>0?km.toLocaleString("es-CL"):"—"}" readonly style="background:#EAEEE0"></label>
+      ${cfgTipo(r).millaje ? `<label class="f"><span>Uso de millaje</span><input type="text" id="usoKm" value="${km>0?km.toLocaleString("es-CL"):"—"}" readonly style="background:#EAEEE0"></label>` : ""}
     </div>
     <div class="grid">
-      <label class="f"><span>Estado de bencina</span><select data-set="reporte.bencina">
+      ${cfgTipo(r).bencina ? `<label class="f"><span>Estado de bencina</span><select data-set="reporte.bencina">
         <option value="">Seleccionar…</option><option ${r.reporte.bencina==="Lleno"?"selected":""}>Lleno</option>
-        <option ${r.reporte.bencina==="Reponer"?"selected":""}>Reponer</option></select></label>
+        <option ${r.reporte.bencina==="Reponer"?"selected":""}>Reponer</option></select></label>` : ""}
       <label class="f"><span>Pedir gas (balones)</span><select data-set="reporte.gas">
         ${["0","1","2"].map(g=>`<option ${r.reporte.gas===g?"selected":""}>${g}</option>`).join("")}</select></label>
     </div>
@@ -3247,6 +3272,13 @@ let tmr;
 document.addEventListener("input", ev=>{
   const el=ev.target, d=el.dataset;
   if(d.veh){ const v=FLOTA.veh[d.veh]; if(v){
+      /* Cambiar el tipo cambia qué checklist se usa. En los arriendos que ya
+         existen de ese vehículo, los checks quedarían leídos contra otra
+         lista, así que conviene que quien lo cambia lo sepa. */
+      if(d.c==="tipo" && el.value!==v.tipo){
+        const conFichas = S.indice.filter(x=>x.patente===d.veh).length;
+        if(conFichas) flash(`Ojo: ${d.veh} ya tiene ${conFichas} arriendo(s). Sus marcas se leerán con el checklist nuevo.`);
+      }
       v[d.c] = (d.c==="km"||d.c==="kmMant") ? (Number(el.value)||0) : el.value;
       if(d.c==="km") v.kmFecha = hoy();
       v.act = Date.now(); v.sucio = true; delete v.provisional; S.flota = listaFlota();
@@ -3277,6 +3309,7 @@ document.addEventListener("input", ev=>{
       if(ft){ ft.min = el.value || "";
         if(ft.value && el.value && ft.value < el.value){ ft.value = el.value; S.r.ft = el.value; } }
     }
+    if(d.set==="patente"){ S.r.tipo = tipoDe(S.r.patente); }
     if(d.set==="suc"||d.set==="patente"){ deb(); pinta(true); return; }
     pintaRail(); pintaPie(); deb(); }
 });
@@ -3386,7 +3419,7 @@ function modalVehiculo(){
         Object.entries(TIPOS_VEH).map(([k,c])=>`<option value="${k}">${c.nombre}</option>`).join("")}</select></label>
       <label class="f"><span>Sucursal base</span><select id="nvSuc">${SUCURSALES.map(x=>`<option>${x}</option>`).join("")}</select></label>
     </div>
-    <p class="hint" style="margin:0 0 10px">El tipo decide qué checklist se usa y si se pide millaje. No se puede cambiar después.</p>
+    <p class="hint" style="margin:0 0 10px">El tipo decide qué checklist se usa y si se pide millaje. Se puede corregir después desde la ficha del vehículo.</p>
     <button class="btn acento wide" id="nvOk">Agregar</button>`);
   const i=document.getElementById("nvPat"); i.focus();
   document.getElementById("nvOk").onclick=async()=>{
