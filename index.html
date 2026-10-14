@@ -2156,8 +2156,15 @@ async function danosAFlota(r){
     }
     /* Si nadie la editó a mano, se mantiene al día con lo que dice la revisión */
     if(ya.auto && ya.estado === "pendiente"){
+      /* Se comparan los identificadores de Drive, no solo CUÁNTAS fotos hay.
+         Una tarea se crea mientras la foto todavía sube, así que nace sin
+         identificador; al terminar la subida la cantidad no cambia, y antes
+         la tarea se quedaba con el hueco para siempre: en el equipo que sacó
+         la foto se veía bien, en los demás decía "Foto no disponible". */
+      const mismas = (a,b) => a.length===b.length &&
+        a.every((x,i)=> x.id===b[i].id && (x.driveId||"")===(b[i].driveId||""));
       const distinto = ya.titulo!==titulo || (ya.detalle||"")!==(detalle||"") ||
-                       (ya.fotos||[]).length !== fotos.length;
+                       !mismas(ya.fotos||[], fotos);
       if(distinto){ ya.titulo=titulo; ya.detalle=detalle||""; ya.fotos=fotos;
                     ya.origen.carpetaId = r.driveCarpeta||ya.origen.carpetaId;
                     ya.act=Date.now(); ya.sucio=true; cambio = true; }
