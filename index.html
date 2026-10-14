@@ -817,6 +817,7 @@ function destino(r, slot, danoId, indice){
 function encolar(r, slot, danoId, media){
   if(!hayDrive()){ media.estado="local"; return; }
   media.estado = "pendiente";
+  media.equipo = nombreEquipo();     // solo este equipo tiene los bytes
   COLA.push({ id:media.id, fichaId:r.id, slot, danoId, media });
   procesaCola();
 }
@@ -843,6 +844,10 @@ async function reanudaSubidas(r){
     if(!ARCHIVOS[m.id]){
       const dato = await St.get("f:"+m.id);
       if(dato) FOTOS[m.id] = dato;
+      /* Sin los bytes aquí: si la subida la empezó OTRO equipo, ese la va a
+         retomar y no hay que tocarla. Marcarla como perdida desde acá
+         saboteaba una subida que el otro dispositivo sí podía terminar. */
+      else if(m.equipo && m.equipo !== nombreEquipo()) continue;
       else {                                            // un video: sus bytes no se guardan
         m.estado = "error";
         m.detalle = "se interrumpió al cerrar la app · vuelve a subirlo";
@@ -2053,6 +2058,31 @@ function nuevaTarea(patente, datos){
    un historial de años no tiene por qué cargarse entero en memoria. */
 async function cargaFotosTarea(id){
   const t = FLOTA.tareas.find(x=>x.id===id); if(!t) return;
+
+  /* Una tarea guarda una COPIA de la referencia a sus fotos. Si nació
+     mientras la foto todavía subía, quedó sin identificador de Drive. En vez
+     de esperar a que el equipo que la sacó la actualice, se busca el dato
+     actual en el arriendo de origen: así se repara en cualquier dispositivo
+     que tenga ese arriendo. */
+  const fichaId = t.origen && t.origen.fichaId;
+  if(fichaId && (t.fotos||[]).some(f=>!f.driveId)){
+    try{
+      const raw = await St.get("r:"+fichaId);
+      if(raw){
+        const r = JSON.parse(raw), todas = [];
+        for(const k of Object.keys(r.media||{})) todas.push(...(r.media[k]||[]));
+        for(const d of r.danos||[]) todas.push(...(d.fotos||[]));
+        let cambio = false;
+        for(const f of t.fotos||[]){
+          if(f.driveId) continue;
+          const m = todas.find(x=>x.id===f.id);
+          if(m && m.driveId){ f.driveId = m.driveId; cambio = true; }
+        }
+        if(cambio){ t.act=Date.now(); t.sucio=true; guardaFlota(); }
+      }
+    }catch(e){}
+  }
+
   for(const f of t.fotos||[])
     if(!FOTOS[f.id]){ const x=await St.get("f:"+f.id); if(x) FOTOS[f.id]=x; }
 }
@@ -3054,11 +3084,20 @@ function tiraHTML(m,slot,danoId){
   /* Si la foto se tomó en otro dispositivo no está en este disco, pero sí
      en Drive: se marca el hueco y pintaFotosDrive la trae. */
   const deDrive = m.tipo==="foto" && !FOTOS[m.id] && m.driveId;
+  /* Sin copia aquí y sin identificador de Drive: la subida está en curso en
+     el equipo donde se tomó. Antes se mostraba una barra de progreso que no
+     correspondía a nada que estuviera pasando en ESTE dispositivo. */
+  const enOtro = !FOTOS[m.id] && !THUMBS[m.id] && !m.driveId
+                 && m.equipo && m.equipo !== nombreEquipo();
   const cuerpo = m.tipo==="foto"
     ? (FOTOS[m.id] ? `<img src="${FOTOS[m.id]}" alt="">`
-      : m.driveId ? `<em class="txt">Trayendo…</em>` : `<em class="txt">Foto</em>`)
-    : (THUMBS[m.id] ? `<img src="${THUMBS[m.id]}" alt=""><em>Video</em>` : `<em class="txt">Video</em>`);
-  const est = m.estado || (m.driveId ? "listo" : "");
+      : m.driveId ? `<em class="txt">Trayendo…</em>`
+      : enOtro ? `<em class="txt">Subiendo en<br>el otro equipo</em>`
+      : `<em class="txt">Foto</em>`)
+    : (THUMBS[m.id] ? `<img src="${THUMBS[m.id]}" alt=""><em>Video</em>`
+      : enOtro ? `<em class="txt">Subiendo en<br>el otro equipo</em>`
+      : `<em class="txt">Video</em>`);
+  const est = enOtro ? "" : (m.estado || (m.driveId ? "listo" : ""));
   const marca = est==="listo" ? `<i class="ok">✓</i>`
     : est==="error" ? `<i class="err">!</i>`
     : est ? `<span class="pb-caja"><span class="pb" style="width:${m.pct||0}%"></span></span>` : "";
