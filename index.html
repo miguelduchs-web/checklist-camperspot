@@ -1874,8 +1874,19 @@ async function borraEnBase(tabla, llaves){
 }
 
 /* ---------- despachadores: la base si está, Drive si no ---------- */
+/* Una sola sincronización a la vez. Al revisar cada 10 segundos, con red
+   lenta una consulta puede no haber terminado cuando parte la siguiente:
+   las dos moverían el corte de tiempo y podrían aplicar cambios encima de
+   la otra. La segunda llamada espera a la primera en vez de competir. */
+let BAJADA_EN_VUELO = null;
 async function bajaArriendos(silencioso){
   if(!(await hayBase())) return bajaArriendosDrive(silencioso);
+  if(BAJADA_EN_VUELO) return BAJADA_EN_VUELO;
+  BAJADA_EN_VUELO = bajaArriendosYa(silencioso);
+  try{ return await BAJADA_EN_VUELO; }
+  finally{ BAJADA_EN_VUELO = null; }
+}
+async function bajaArriendosYa(silencioso){
   try{
     if(!BD.importado) await importaABase();
     await bajaDeBase(silencioso);
