@@ -261,11 +261,12 @@ pre.res{white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:12.5px
 const SUCURSALES = ["Santiago","Puerto Montt"];
 
 const FLOTA_BASE = [
-  {patente:"SFCX19", suc:"Santiago", mant:"189.603 millas", rt:"2025-12-16", permiso:"2026-03-31"},
-  {patente:"SFCX20", suc:"Santiago", mant:"186.880 millas", rt:"2025-12-25", permiso:"2026-03-31"},
-  {patente:"SPBD28", suc:"Santiago", mant:"164.435 millas", rt:"2026-12-17", permiso:"2026-03-31"},
-  {patente:"SPBD29", suc:"Santiago", mant:"156.261 millas", rt:"2025-12-16", permiso:"2026-03-31"},
-  {patente:"SDWY74", suc:"Santiago", mant:"", rt:"", permiso:""},
+  {patente:"SFCX19", tipo:"mh", suc:"Santiago", mant:"189.603 millas", rt:"2025-12-16", permiso:"2026-03-31"},
+  {patente:"SFCX20", tipo:"mh", suc:"Santiago", mant:"186.880 millas", rt:"2025-12-25", permiso:"2026-03-31"},
+  {patente:"SPBD28", tipo:"mh", suc:"Santiago", mant:"164.435 millas", rt:"2026-12-17", permiso:"2026-03-31"},
+  {patente:"SPBD29", tipo:"mh", suc:"Santiago", mant:"156.261 millas", rt:"2025-12-16", permiso:"2026-03-31"},
+  {patente:"SDWY74", tipo:"mh", suc:"Santiago", mant:"", rt:"", permiso:""},
+  {patente:"SKY536", tipo:"cr", suc:"Santiago", mant:"", rt:"", permiso:""},
 ];
 const ORDEN = FLOTA_BASE.map(v=>v.patente);
 const ordenaFlota = l => l.slice().sort((a,b)=>{
@@ -276,14 +277,14 @@ const ordenaFlota = l => l.slice().sort((a,b)=>{
 
 const ADICIONALES = ["Utensilios de cocina","Ropa de cama","Sillas y mesas","Parrilla","Portabicicletas","Ninguno"];
 
-const PREP = ["Desagüe de aguas grises y negras","Manguera de desagüe","Agua potable","Cargar agua sapito",
+const PREP_MH = ["Desagüe de aguas grises y negras","Manguera de desagüe","Agua potable","Cargar agua sapito",
 "Manguera de agua con dos adaptadores","Gas","Gata, llave, triángulo y kit primeros auxilios",
 "Escoba, basurero y legos","Rueda de repuesto","Presión adecuada neumáticos","Water Heater","Generador",
 "Microondas","Aire acondicionado","Quemadores","Extractor de aire","Refrigerador","Calefacción","Bencina",
 "Aire acondicionado cabina","Limpieza por dentro y por fuera","Bolsitas para aguas negras",
 "Guantes para desaguar","Adaptadores de enchufe","Chaleco reflectante","Documentos al día"];
 
-const REV_GRUPOS = [
+const REV_MH = [
   {id:"ext", t:"Daños exteriores", items:["Daños laterales","Daños techo","Daños bajo"]},
   {id:"falta", t:"Que no falte", items:["Gata, llave y rueda de repuesto","Manguera de agua con dos adaptadores",
     "Escoba y basurero","Manguera de desagüe","Chaleco reflectante y documentos del vehículo"]},
@@ -297,6 +298,49 @@ const REV_GRUPOS = [
     "Líquido refrigerante","Dirección hidráulica","Aceite motor","Aceite de caja","Sulfato batería",
     "Prueba de conducción breve"]},
 ];
+
+/* ── Casa rodante ──────────────────────────────────────────────────
+   Lista propia, tomada del formulario que ya se usaba. No tiene motor:
+   desaparecen generador, bencina, aire acondicionado de cabina, aceites
+   y dirección hidráulica. Tampoco tiene tablero, así que no van las
+   fotos de millaje.
+   Las listas de motorhome quedan intactas a propósito: sus ítems y su
+   orden definen las claves (p0, p1, ext0…) de las fichas ya guardadas,
+   y cambiarlas correría los checks de todo lo histórico. */
+const PREP_CR = ["Desagüe de aguas grises y negras","Agua potable","Gas","Rueda de repuesto",
+"Manguera de desagüe","Manguera de agua con dos adaptadores","Gata, llave, triángulo y kit primeros auxilios",
+"Escoba y basurero","Presión adecuada neumáticos","Water Heater","Microondas","Aire acondicionado",
+"Quemadores","Extractor de aire","Refrigerador","Calefacción","Limpieza por dentro y por fuera",
+"Bolsitas para aguas negras","Guantes para desaguar","Adaptadores de enchufe","Documentos al día"];
+
+const REV_CR = [
+  {id:"ext", t:"Daños exteriores", items:["Daños laterales","Daños techo","Daños bajo"]},
+  {id:"falta", t:"Que no falte", items:["Gata, llave y rueda de repuesto","Manguera de agua con dos adaptadores",
+    "Escoba y basurero","Manguera de desagüe","Documentos del vehículo"]},
+  {id:"sis", t:"Sistemas casa rodante", items:["Desagüe de aguas grises y negras (por fuera)",
+    "Enchufe a corriente 220 (por fuera)","Puerta y pestillos","Ventanas, mosquiteros y cortinas",
+    "Escotillas","Luces interior","Techo","Suelo","Murallas","Cajones","Camas","Cama comedor",
+    "Mesa y mesón","Llaves de agua","Ducha","WC","Cocina a gas y extractor de aire",
+    "Water Heater y bomba de agua","Nivel de desagüe y estado de batería","Aire acondicionado",
+    "Microondas","Refrigerador","Calefacción"]},
+  {id:"mec", t:"Chequeo vehicular", items:["Luces exteriores (delanteras, traseras, intermitentes, freno)",
+    "Prueba de conducción breve"]},
+];
+
+/* Qué cambia entre un tipo y otro. El prefijo es SOLO para mostrar: la
+   patente se guarda limpia, porque de ella dependen los nombres de las
+   carpetas en Drive y las filas de la base. */
+const TIPOS_VEH = {
+  mh: { etiqueta:"MH", nombre:"Motorhome",    prep:PREP_MH, rev:REV_MH,
+        millaje:true,  mantencion:true,  tablero:true },
+  cr: { etiqueta:"CR", nombre:"Casa rodante", prep:PREP_CR, rev:REV_CR,
+        millaje:false, mantencion:false, tablero:false },
+};
+const tipoDe    = pat => (typeof FLOTA!=="undefined" && FLOTA.veh[pat] && FLOTA.veh[pat].tipo)
+                         || (FLOTA_BASE.find(v=>v.patente===pat)||{}).tipo || "mh";
+const cfgTipo   = r => TIPOS_VEH[tipoDe(r && r.patente)] || TIPOS_VEH.mh;
+const etiquetaPat = pat => pat ? (TIPOS_VEH[tipoDe(pat)]||TIPOS_VEH.mh).etiqueta+": "+pat : "";
+const gruposRev = r => cfgTipo(r).rev;
 
 const SLOTS = [
   {k:"f_tab_s",et:"entrega",  tipo:"foto",  t:"Foto al tablero (salida)", d:"Debe verse el millaje y el indicador de bencina.", req:1},
@@ -385,7 +429,7 @@ function nuevaFicha(){
 
 /* ══════════ PROGRESO ══════════ */
 const adicSel = r => (r.adicionales||[]).filter(a=>a!=="Ninguno");
-const itemsPrep = r => PREP.map((t,i)=>({k:"p"+i,t})).concat(adicSel(r).map(a=>({k:"a:"+a,t:a,adic:1})));
+const itemsPrep = r => cfgTipo(r).prep.map((t,i)=>({k:"p"+i,t})).concat(adicSel(r).map(a=>({k:"a:"+a,t:a,adic:1})));
 const itemsRev = (g,r) => g.items.map((t,i)=>({k:g.id+i,t}))
   .concat(g.id==="falta" ? adicSel(r).map(a=>({k:"falta_a:"+a,t:a,adic:1})) : []);
 
@@ -393,19 +437,25 @@ function prog(r,et){
   if(!r) return [0,1];
   if(et==="datos"){ const c=[r.patente,r.cliente,r.fi,r.ft]; return [c.filter(Boolean).length,c.length]; }
   if(et==="prep"){ const it=itemsPrep(r); return [it.filter(x=>r.prep[x.k]).length, it.length]; }
+  /* Una casa rodante no tiene tablero ni motor: en Entrega solo cuentan
+     los videos, y en Reporte no se pide millaje. Si se contaran igual que
+     en una motorhome, nunca llegaría al 100%. */
+  const cfg = cfgTipo(r);
   if(et==="entrega"){
-    let n=0;
+    let n=0, tot=1;
     if(cuentaVideos(r) >= 3) n++;
-    if((r.media.f_tab_s||[]).length) n++;
-    if(r.entrega.km) n++;
-    return [n,3];
-  }
-  if(et==="revision"){
-    let n=(r.media.f_tab_l||[]).length?1:0, tot=1;
-    REV_GRUPOS.forEach(g=>itemsRev(g,r).forEach(x=>{ tot++; if(r.rev[x.k]) n++; }));
+    if(cfg.tablero){ tot++; if((r.media.f_tab_s||[]).length) n++; }
+    if(cfg.millaje){ tot++; if(r.entrega.km) n++; }
     return [n,tot];
   }
-  const c=[r.reporte.km,r.reporte.bencina,r.reporte.gas]; return [c.filter(Boolean).length,c.length];
+  if(et==="revision"){
+    let n=0, tot=0;
+    if(cfg.tablero){ tot++; if((r.media.f_tab_l||[]).length) n++; }
+    gruposRev(r).forEach(g=>itemsRev(g,r).forEach(x=>{ tot++; if(r.rev[x.k]) n++; }));
+    return [n, tot||1];
+  }
+  const c=[...(cfg.millaje?[r.reporte.km]:[]), r.reporte.bencina, r.reporte.gas];
+  return [c.filter(Boolean).length, c.length];
 }
 function faseDe(r){
   if(r.estado==="cerrado") return {k:"cerrada", t:"Cerrada", etapa:"reporte"};
@@ -742,7 +792,7 @@ function destino(r, slot, danoId, indice){
   if(String(slot).startsWith("rev:")){
     const k=slot.slice(4);
     let t=k;
-    REV_GRUPOS.forEach(g=>itemsRev(g,r).forEach(x=>{ if(x.k===k) t=x.t; }));
+    gruposRev(r).forEach(g=>itemsRev(g,r).forEach(x=>{ if(x.k===k) t=x.t; }));
     return { sub:"Daños", base: slug(t) };
   }
   const sv=SLOTS_VIDEO.find(x=>x.k===slot);
@@ -1983,12 +2033,15 @@ function faltantes(r){
   if(np < tp) out.push({bloquea:false, etapa:"prep", t:`Preparación incompleta (${np} de ${tp})`});
   const faltanVid = SLOTS_VIDEO.filter(def=>!videosDe(r,def.k).length).map(def=>def.t);
   if(faltanVid.length) out.push({bloquea:false, etapa:"entrega", t:"Sin video de "+faltanVid.join(", ")});
-  if(!r.entrega.km) out.push({bloquea:false, etapa:"entrega", t:"Falta el millaje de salida"});
-  if(!(r.media.f_tab_s||[]).length) out.push({bloquea:false, etapa:"entrega", t:"Falta la foto del tablero de salida"});
-  const revTot = REV_GRUPOS.reduce((a,g)=>a+itemsRev(g,r).length,0);
-  const revHechos = REV_GRUPOS.reduce((a,g)=>a+itemsRev(g,r).filter(x=>r.rev[x.k]).length,0);
+  if(cfgTipo(r).millaje && !r.entrega.km)
+    out.push({bloquea:false, etapa:"entrega", t:"Falta el millaje de salida"});
+  if(cfgTipo(r).tablero && !(r.media.f_tab_s||[]).length)
+    out.push({bloquea:false, etapa:"entrega", t:"Falta la foto del tablero de salida"});
+  const revTot = gruposRev(r).reduce((a,g)=>a+itemsRev(g,r).length,0);
+  const revHechos = gruposRev(r).reduce((a,g)=>a+itemsRev(g,r).filter(x=>r.rev[x.k]).length,0);
   if(revHechos < revTot) out.push({bloquea:false, etapa:"revision", t:`Revisión incompleta (${revHechos} de ${revTot})`});
-  if(!r.reporte.km) out.push({bloquea:false, etapa:"reporte", t:"Falta el millaje de llegada"});
+  if(cfgTipo(r).millaje && !r.reporte.km)
+    out.push({bloquea:false, etapa:"reporte", t:"Falta el millaje de llegada"});
   const salida = Number(r.entrega.km)||0, llegada = Number(r.reporte.km)||0;
   if(salida && llegada && llegada < salida)
     out.push({bloquea:false, etapa:"reporte", t:"El millaje de llegada es menor que el de salida"});
@@ -2004,6 +2057,7 @@ function faltantes(r){
    arriendo, venga de la salida o de la llegada. Nunca retrocede: si
    alguien escribe un número menor al que ya tiene la flota, se ignora. */
 async function millajeAFlota(r){
+  if(!cfgTipo(r).millaje) return false;      // una casa rodante no lleva millaje
   const salida  = Number(r.entrega && r.entrega.km) || 0;
   const llegada = Number(r.reporte && r.reporte.km) || 0;
   const km = Math.max(salida, llegada);
@@ -2446,7 +2500,7 @@ function vistaFlota(){
     if(venc(v.permiso)) docs.push("Permiso vencido");
     else if(porVencer(v.permiso)) docs.push("Permiso vence "+fecha(v.permiso));
     return `<button class="ficha" data-vehabrir="${v.patente}" data-fase="${ab?"revision":"lista"}">
-      <b>${esc(v.patente)}</b>
+      <b>${esc(etiquetaPat(v.patente))}</b>
       <small>${esc(v.suc||"")}${v.km?` · ${Number(v.km).toLocaleString("es-CL")} millas`:""}</small>
       <span class="m">
         ${ab?`<span class="badge warn">${ab} pendiente${ab>1?"s":""}</span>`:`<span class="badge ok">Al día</span>`}
@@ -2467,9 +2521,10 @@ function vistaVehiculo(){
       <button class="btn ghost sm" data-act="verFlota">‹ Flota</button>
       <button class="btn ghost sm" data-act="addTarea" style="margin-left:auto">Agregar tarea</button>
     </div>
-    <h2 class="tit" style="font-size:26px;margin:0 0 2px">${esc(v.patente)}</h2>
-    <p class="hint" style="margin:0 0 14px">${esc(v.suc||"")}${v.km
-      ? ` · ${Number(v.km).toLocaleString("es-CL")} millas${v.kmFecha?" al "+fecha(v.kmFecha):""}`
+    <h2 class="tit" style="font-size:26px;margin:0 0 2px">${esc(etiquetaPat(v.patente))}</h2>
+    <p class="hint" style="margin:0 0 14px">${esc(TIPOS_VEH[v.tipo||"mh"].nombre)} · ${esc(v.suc||"")}${
+      !TIPOS_VEH[v.tipo||"mh"].millaje ? ""
+      : v.km ? ` · ${Number(v.km).toLocaleString("es-CL")} millas${v.kmFecha?" al "+fecha(v.kmFecha):""}`
       : " · sin millaje registrado"}</p>
 
   <div class="card"><h3>Por hacer <em>${abiertas.length}</em></h3>
@@ -2481,13 +2536,14 @@ function vistaVehiculo(){
     <div class="grid">
       <label class="f"><span>Sucursal base</span><select data-veh="${v.patente}" data-c="suc">
         ${SUCURSALES.map(x=>`<option ${v.suc===x?"selected":""}>${x}</option>`).join("")}</select></label>
-      <label class="f"><span>Millaje actual</span><input type="number" inputmode="numeric" data-veh="${v.patente}" data-c="km" value="${esc(v.km||"")}" placeholder="Ej: 189603"></label>
+      ${!TIPOS_VEH[v.tipo||"mh"].millaje ? "" :
+      `<label class="f"><span>Millaje actual</span><input type="number" inputmode="numeric" data-veh="${v.patente}" data-c="km" value="${esc(v.km||"")}" placeholder="Ej: 189603"></label>`}
     </div>
-    <div class="grid">
+    ${!TIPOS_VEH[v.tipo||"mh"].mantencion ? "" : `<div class="grid">
       <label class="f"><span>Próxima mantención (millas)</span><input type="number" inputmode="numeric" data-veh="${v.patente}" data-c="kmMant" value="${esc(v.kmMant||"")}" placeholder="Ej: 195000"></label>
       <label class="f"><span>Faltan</span><input type="text" readonly style="background:#EAEEE0" value="${
         v.kmMant&&v.km ? Math.max(0, v.kmMant-v.km).toLocaleString("es-CL")+" millas" : "—"}"></label>
-    </div>
+    </div>`}
     <div class="grid">
       <label class="f"><span>Revisión técnica vence</span><input type="date" data-veh="${v.patente}" data-c="rt" value="${v.rt||""}"></label>
       <label class="f"><span>Permiso de circulación hasta</span><input type="date" data-veh="${v.patente}" data-c="permiso" value="${v.permiso||""}"></label>
@@ -2597,7 +2653,7 @@ function modalTarea(id){
       <button data-taredel="${f.id}" aria-label="Quitar">×</button></div>`;
   }).join("");
 
-  modal(`<h3>Tarea · ${esc(t.patente)}</h3>
+  modal(`<h3>Tarea · ${esc(etiquetaPat(t.patente))}</h3>
     <label class="f"><span>Qué hay que hacer</span><input type="text" data-tarc="titulo" value="${esc(t.titulo)}" placeholder="Ej: cambiar sello de escotilla"></label>
     <div class="grid">
       <label class="f"><span>Tipo</span><select data-tarc="tipo">
@@ -2678,10 +2734,10 @@ function secDatos(r){
     <div class="grid">
       <label class="f"><span>Sucursal</span><select data-set="suc">${SUCURSALES.map(s=>`<option ${r.suc===s?"selected":""}>${s}</option>`).join("")}</select></label>
       <label class="f"><span>Patente</span><select data-set="patente"><option value="">Seleccionar…</option>
-        ${veh.map(x=>`<option value="${x.patente}" ${r.patente===x.patente?"selected":""}>${x.patente}${x.suc&&x.suc!==r.suc?" · base "+x.suc:""}</option>`).join("")}</select></label>
+        ${veh.map(x=>`<option value="${x.patente}" ${r.patente===x.patente?"selected":""}>${etiquetaPat(x.patente)}${x.suc&&x.suc!==r.suc?" · base "+x.suc:""}</option>`).join("")}</select></label>
     </div>
     ${(()=>{ const ch=choques(r); return ch.length?`<div class="aviso" style="margin:0 0 10px">
-      <b>${esc(r.patente)} ya tiene un arriendo en esas fechas.</b>
+      <b>${esc(etiquetaPat(r.patente))} ya tiene un arriendo en esas fechas.</b>
       ${ch.map(f=>`<br>${esc(f.cliente||"sin cliente")} · ${fecha(f.fi)} → ${fecha(f.ft)}</br>`).join("")}
       Revisa antes de seguir.</div>`:""; })()}
     ${v?`<p class="hint">Mantención: ${esc(v.mant)} · RT ${fecha(v.rt)} <span class="badge ${venc(v.rt)?"bad":"ok"}">${venc(v.rt)?"vencida":"vigente"}</span> · Permiso ${fecha(v.permiso)} <span class="badge ${venc(v.permiso)?"bad":"ok"}">${venc(v.permiso)?"vencido":"vigente"}</span></p>`:""}
@@ -2711,7 +2767,7 @@ function secDatos(r){
 function secPrep(r){
   const[n,t]=prog(r,"prep"), ad=adicSel(r);
   return `<div class="card"><h3>Preparación <em>${n} de ${t}</em></h3>
-    <ul class="items">${PREP.map((it,i)=>`<li>
+    <ul class="items">${cfgTipo(r).prep.map((it,i)=>`<li>
       <button class="chk" data-chk="p${i}" aria-pressed="${!!r.prep["p"+i]}"><span class="box"></span>${it}</button></li>`).join("")}</ul>
     ${ad.length?`<div class="sub">Adicionales contratados</div>
       <ul class="items">${ad.map(a=>`<li>
@@ -2757,15 +2813,15 @@ function secEntrega(r){
   </div></div>
 
   <div class="card"><h3>Tablero y millaje</h3>
-    ${slotHTML(SLOTS.find(x=>x.k==="f_tab_s"),r)}
+    ${cfgTipo(r).tablero ? slotHTML(SLOTS.find(x=>x.k==="f_tab_s"),r) : ""}
     <div class="pad">
-    <label class="f" style="margin:0"><span>Millaje de salida</span><input type="number" inputmode="numeric" data-set="entrega.km" value="${esc(r.entrega.km)}" placeholder="Ej: 189603"></label>
+    ${cfgTipo(r).millaje ? `<label class="f" style="margin:0"><span>Millaje de salida</span><input type="number" inputmode="numeric" data-set="entrega.km" value="${esc(r.entrega.km)}" placeholder="Ej: 189603"></label>` : ""}
   </div></div>`;
 }
 
 function secRevision(r){
-  return `<div class="card"><h3>Tablero de llegada</h3>${slotHTML(SLOTS.find(s=>s.k==="f_tab_l"),r)}</div>
-  ${REV_GRUPOS.map(g=>{
+  return `${cfgTipo(r).tablero ? `<div class="card"><h3>Tablero de llegada</h3>${slotHTML(SLOTS.find(s=>s.k==="f_tab_l"),r)}</div>` : ""}
+  ${gruposRev(r).map(g=>{
     const its=itemsRev(g,r), hayAd=its.some(x=>x.adic);
     return `<div class="card"><h3>${g.t} <em>${its.filter(x=>r.rev[x.k]).length} de ${its.length}</em></h3>
     <ul class="items">${its.map(x=>{
@@ -2818,7 +2874,7 @@ function archivosDe(r){
 
 function hallazgos(r){
   const out=[];
-  REV_GRUPOS.forEach(g=>itemsRev(g,r).forEach(x=>{
+  gruposRev(r).forEach(g=>itemsRev(g,r).forEach(x=>{
     const media=r.media["rev:"+x.k]||[];
     if(r.rev[x.k]==="dano" || media.length)
       out.push({grupo:g.t, t:x.t, nota:r.revNota[x.k]||"", media, slot:"rev:"+x.k});
@@ -2853,7 +2909,7 @@ function secReporte(r){
   </div>
   <div class="card"><h3>Cierre</h3><div class="pad">
     <div class="grid">
-      <label class="f"><span>Millaje de llegada</span><input type="number" inputmode="numeric" data-set="reporte.km" value="${esc(r.reporte.km)}" placeholder="Ej: 190450"></label>
+      ${cfgTipo(r).millaje ? `<label class="f"><span>Millaje de llegada</span><input type="number" inputmode="numeric" data-set="reporte.km" value="${esc(r.reporte.km)}" placeholder="Ej: 190450"></label>` : ""}
       <label class="f"><span>Uso de millaje</span><input type="text" id="usoKm" value="${km>0?km.toLocaleString("es-CL"):"—"}" readonly style="background:#EAEEE0"></label>
     </div>
     <div class="grid">
@@ -2870,9 +2926,9 @@ function secReporte(r){
     ${(()=>{ const v=FLOTA.veh[r.patente]||{}, km=Number(r.reporte.km)||0, sube=km>(Number(v.km)||0);
       const pend=hs.length+r.danos.length;
       return `<ul class="arch" style="margin:0">
-        <li style="padding:6px 0">${sube
-          ? `<code>${esc(r.patente)}</code> <small>millaje actual pasa de ${(Number(v.km)||0).toLocaleString("es-CL")} a ${km.toLocaleString("es-CL")}</small>`
-          : `<code>${esc(r.patente)}</code> <small>${km?"el millaje del vehículo ya es mayor, no se toca":"sin millaje de llegada, el vehículo no cambia"}</small>`}</li>
+        ${!cfgTipo(r).millaje ? "" : `<li style="padding:6px 0">${sube
+          ? `<code>${esc(etiquetaPat(r.patente))}</code> <small>millaje actual pasa de ${(Number(v.km)||0).toLocaleString("es-CL")} a ${km.toLocaleString("es-CL")}</small>`
+          : `<code>${esc(etiquetaPat(r.patente))}</code> <small>${km?"el millaje del vehículo ya es mayor, no se toca":"sin millaje de llegada, el vehículo no cambia"}</small>`}</li>`}
         <li style="padding:6px 0">${pend
           ? `<code>${pend} reparación(es)</code> <small>se agregan como pendientes en la flota</small>`
           : `<code>Sin daños</code> <small>no se crea ninguna tarea</small>`}</li>
@@ -3307,16 +3363,23 @@ function modalCierre(pend){
 function modalVehiculo(){
   modal(`<h3>Agregar vehículo</h3>
     <label class="f"><span>Patente</span><input type="text" id="nvPat" placeholder="Ej: SFCX21" autocapitalize="characters"></label>
-    <label class="f"><span>Sucursal base</span><select id="nvSuc">${SUCURSALES.map(x=>`<option>${x}</option>`).join("")}</select></label>
+    <div class="grid">
+      <label class="f"><span>Tipo</span><select id="nvTipo">${
+        Object.entries(TIPOS_VEH).map(([k,c])=>`<option value="${k}">${c.nombre}</option>`).join("")}</select></label>
+      <label class="f"><span>Sucursal base</span><select id="nvSuc">${SUCURSALES.map(x=>`<option>${x}</option>`).join("")}</select></label>
+    </div>
+    <p class="hint" style="margin:0 0 10px">El tipo decide qué checklist se usa y si se pide millaje. No se puede cambiar después.</p>
     <button class="btn acento wide" id="nvOk">Agregar</button>`);
   const i=document.getElementById("nvPat"); i.focus();
   document.getElementById("nvOk").onclick=async()=>{
     const pat=i.value.toUpperCase().trim();
     if(!pat) return flash("Escribe la patente");
     if(FLOTA.veh[pat]) return flash("Esa patente ya existe");
-    FLOTA.veh[pat] = {patente:pat, suc:document.getElementById("nvSuc").value, rt:"", permiso:"", act:Date.now(), sucio:true};
+    const tipo = document.getElementById("nvTipo").value || "mh";
+    FLOTA.veh[pat] = {patente:pat, tipo, suc:document.getElementById("nvSuc").value,
+                      rt:"", permiso:"", act:Date.now(), sucio:true};
     S.flota = listaFlota(); await guardaFlota();
-    cierraModal(); pinta(); flash(pat+" agregada");
+    cierraModal(); pinta(); flash(etiquetaPat(pat)+" agregada");
   };
 }
 function modal(html){
@@ -3343,7 +3406,7 @@ function textoResumen(r){
   L.push(`Videos del recorrido: ${cuentaVideos(r)} de 3`);
   L.push(`Foto al tablero: ${(r.media.f_tab_s||[]).length?"sí":"pendiente"}`);
   L.push(``,`REVISIÓN`);
-  REV_GRUPOS.forEach(g=>{
+  gruposRev(r).forEach(g=>{
     const its=itemsRev(g,r);
     const mal=its.map(x=>({t:x.t+(x.adic?" (adicional)":""),v:r.rev[x.k],nota:r.revNota[x.k],
       n:(r.media["rev:"+x.k]||[]).length})).filter(x=>x.v==="dano"||x.n);
