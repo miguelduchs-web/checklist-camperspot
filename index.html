@@ -288,7 +288,9 @@ const REV_MH = [
   {id:"ext", t:"Daños exteriores", items:["Daños laterales","Daños techo","Daños bajo"]},
   {id:"falta", t:"Que no falte", items:["Gata, llave y rueda de repuesto","Manguera de agua con dos adaptadores",
     "Escoba y basurero","Manguera de desagüe","Chaleco reflectante y documentos del vehículo"]},
-  {id:"sis", t:"Sistemas motorhome", items:["Desagüe de aguas grises y negras (por fuera)",
+  {id:"sis", t:"Sistemas motorhome", items:[
+    {k:"sis_filtracion", t:"Filtraciones de agua bajo el mesón de cocina"},
+    "Desagüe de aguas grises y negras (por fuera)",
     "Enchufe a corriente 220 (por fuera)","Aceite de generador","Puerta y pestillos",
     "Ventanas, mosquiteros y cortinas","Escotillas","Luces interior","Techo","Suelo","Murallas","Cajones",
     "Camas","Cama comedor","Mesa y mesón","Llaves de agua","Ducha","WC","Cocina a gas y extractor de aire",
@@ -317,7 +319,9 @@ const REV_CR = [
   {id:"ext", t:"Daños exteriores", items:["Daños laterales","Daños techo","Daños bajo"]},
   {id:"falta", t:"Que no falte", items:["Gata, llave y rueda de repuesto","Manguera de agua con dos adaptadores",
     "Escoba y basurero","Manguera de desagüe","Documentos del vehículo"]},
-  {id:"sis", t:"Sistemas casa rodante", items:["Desagüe de aguas grises y negras (por fuera)",
+  {id:"sis", t:"Sistemas casa rodante", items:[
+    {k:"sis_filtracion", t:"Filtraciones de agua bajo el mesón de cocina"},
+    "Desagüe de aguas grises y negras (por fuera)",
     "Enchufe a corriente 220 (por fuera)","Puerta y pestillos","Ventanas, mosquiteros y cortinas",
     "Escotillas","Luces interior","Techo","Suelo","Murallas","Cajones","Camas","Cama comedor",
     "Mesa y mesón","Llaves de agua","Ducha","WC","Cocina a gas y extractor de aire",
@@ -443,8 +447,18 @@ function nuevaFicha(){
 /* ══════════ PROGRESO ══════════ */
 const adicSel = r => (r.adicionales||[]).filter(a=>a!=="Ninguno");
 const itemsPrep = r => cfgTipo(r).prep.map((t,i)=>({k:"p"+i,t})).concat(adicSel(r).map(a=>({k:"a:"+a,t:a,adic:1})));
-const itemsRev = (g,r) => g.items.map((t,i)=>({k:g.id+i,t}))
-  .concat(g.id==="falta" ? adicSel(r).map(a=>({k:"falta_a:"+a,t:a,adic:1})) : []);
+/* Los ítems de texto numeran por posición (sis0, sis1…) y esas claves son
+   las que tienen guardadas TODAS las fichas históricas. Por eso un ítem
+   nuevo al principio corría todo y movía los checks de ítem en silencio.
+   Un ítem escrito como objeto trae su clave propia y NO consume número,
+   así se puede insertar donde sea sin tocar lo ya guardado. */
+const itemsRev = (g,r) => {
+  let i = -1;
+  return g.items.map(it => typeof it === "object"
+      ? { k: it.k, t: it.t }
+      : { k: g.id + (++i), t: it })
+    .concat(g.id==="falta" ? adicSel(r).map(a=>({k:"falta_a:"+a,t:a,adic:1})) : []);
+};
 
 function prog(r,et){
   if(!r) return [0,1];
@@ -2318,9 +2332,32 @@ async function diagSync(){
 }
 
 /* ══════════ AJUSTES ══════════ */
+/* El panel de Drive vive plegado dentro de Archivo: después de configurarlo
+   una vez, nadie necesita verlo todos los días ocupando un botón del menú. */
 function vistaAjustes(){
+  const fs = S.indice.slice().sort((a,b)=>(b.carpeta||"").localeCompare(a.carpeta||""));
   app.innerHTML=`<div class="row" style="margin:14px 0"><button class="btn ghost" data-act="inicio">Volver</button></div>
-  <h2 class="tit" style="font-size:22px;margin:0 0 10px">Conexión con Google Drive</h2>
+  <h2 class="tit" style="font-size:22px;margin:0 0 4px">Archivo</h2>
+  <p class="hint" style="margin:0 0 14px">Todos los arriendos, del más reciente al más antiguo.</p>
+  ${fs.length? `<div class="card"><ul class="arch" style="padding:6px 14px">
+    ${fs.map(f=>`<li style="padding:9px 0">
+      <code>${esc(f.carpeta||"—")}</code>
+      <small>${esc(f.cliente||"sin cliente")} · ${f.estado==="cerrado"?"cerrada":"en curso"}</small>
+      <div class="row" style="margin-top:6px">
+        ${f.driveCarpeta
+          ? `<a class="btn ghost sm" style="text-decoration:none" target="_blank" rel="noopener"
+               href="https://drive.google.com/drive/folders/${f.driveCarpeta}">Abrir en Drive</a>`
+          : `<span class="badge warn">Sin respaldo</span>`}
+        <button class="btn ghost sm" data-abre="${f.id}">Abrir ficha</button>
+        <button class="btn ghost sm" data-borrafi="${f.id}" style="margin-left:auto">Eliminar</button>
+      </div>
+    </li>`).join("")}
+    </ul></div>`
+   : `<div class="vacio"><p>Todavía no hay arriendos archivados.</p></div>`}
+
+  <details class="desplegable" ${(!hayDrive()||S.abrirDrive)?"open":""} style="margin-top:14px">
+    <summary>Conexión y espacio${hayDrive()?"":" · falta conectar"}</summary>
+    <div class="items">
   <div class="card"><div class="pad">
     <label class="f"><span>URL del Worker</span>
       <input type="text" id="cfgUrl" value="${esc(CFG.url)}" placeholder="https://...workers.dev"></label>
@@ -2333,17 +2370,15 @@ function vistaAjustes(){
       Sirve también al instalar la app en la pantalla de inicio, que en iPhone parte en blanco.</p>
       <button class="btn ghost sm" id="cfgCopiar">Copiar enlace</button></div>`:""}
     <div class="row" style="margin-top:10px"><button class="btn ghost sm" id="cfgDiag">Diagnóstico de sincronización</button></div>
-    <p class="hint" id="cfgEstado">${hayDrive()?"Configurado. Las fotos, videos y documentos se suben solos.":"Sin configurar: todo queda solo en este teléfono."}</p>
+    <p class="hint" id="cfgEstado">${hayDrive()?"":"Sin configurar: todo queda solo en este teléfono."}</p>
   </div></div>
   <div class="card"><h3>Espacio en este dispositivo</h3><div class="pad">
     <p class="hint" id="espacio" style="margin:0 0 10px">Calculando…</p>
     <button class="btn ghost" id="cfgLimpiar">Liberar fotos ya respaldadas</button>
     <p class="hint">Borra del teléfono las fotos de arriendos cerrados que ya están en Drive. Siguen disponibles desde el link de la carpeta.</p>
   </div></div>
-  <div class="card"><h3>Cómo funciona</h3><div class="pad">
-    <p class="hint" style="margin:0 0 8px">Cada arriendo genera una carpeta en el Drive de la cuenta conectada, con tres subcarpetas: Videos, Ficha y Daños.</p>
-    <p class="hint" style="margin:0">Los archivos se suben en segundo plano mientras sigues llenando el checklist. Si se corta la señal, la subida retoma donde iba.</p>
-  </div></div>`;
+    </div>
+  </details>`;
   (async()=>{
     const claves=await St.list("f:");
     let bytes=0; for(const k of claves){ const v=await St.get(k); if(v) bytes+=v.length*0.75; }
@@ -2419,8 +2454,7 @@ function pinta(keep){
   try{
     if(S.vista==="inicio") vistaInicio();
     else if(S.vista==="flota") vistaFlota();
-    else if(S.vista==="archivo") vistaArchivo();
-    else if(S.vista==="ajustes") vistaAjustes();
+    else if(S.vista==="archivo"||S.vista==="ajustes") vistaAjustes();
     else if(S.vista==="vehiculo") vistaVehiculo();
     else vistaFicha();
   }catch(e){
@@ -2485,27 +2519,6 @@ function pintaPie(){
 }
 
 /* ---------- inicio ---------- */
-function vistaArchivo(){
-  const fs=S.indice.slice().sort((a,b)=>(b.carpeta||"").localeCompare(a.carpeta||""));
-  app.innerHTML=`<div class="row" style="margin:14px 0"><button class="btn ghost" data-act="inicio">Volver</button></div>
-  <h2 class="tit" style="font-size:22px;margin:0 0 4px">Archivo</h2>
-  <p class="hint" style="margin:0 0 14px">Todos los arriendos, del más reciente al más antiguo. Desde aquí puedes abrir su carpeta en Drive o eliminarlos de este dispositivo.</p>
-  ${fs.length? `<div class="card"><ul class="arch" style="padding:6px 14px">
-    ${fs.map(f=>`<li style="padding:9px 0">
-      <code>${esc(f.carpeta||"—")}</code>
-      <small>${esc(f.cliente||"sin cliente")} · ${f.estado==="cerrado"?"cerrada":"en curso"}</small>
-      <div class="row" style="margin-top:6px">
-        ${f.driveCarpeta
-          ? `<a class="btn ghost sm" style="text-decoration:none" target="_blank" rel="noopener"
-               href="https://drive.google.com/drive/folders/${f.driveCarpeta}">Abrir en Drive</a>`
-          : `<span class="badge warn">Sin respaldo</span>`}
-        <button class="btn ghost sm" data-abre="${f.id}">Abrir ficha</button>
-        <button class="btn ghost sm" data-borrafi="${f.id}" style="margin-left:auto">Eliminar</button>
-      </div>
-    </li>`).join("")}
-    </ul></div>`
-   : `<div class="vacio"><p>Todavía no hay arriendos archivados.</p></div>`}`;
-}
 
 /* Mira arriendos y flota: decir "todo respaldado" mirando solo una mitad
    es peor que no decir nada, porque da confianza sin fundamento. */
@@ -2555,8 +2568,7 @@ function vistaInicio(){
     <div class="row" style="margin:14px 0 4px">
       <button class="btn acento" data-act="nueva">${ICO.motorhome}Nuevo arriendo</button>
       <button class="btn ghost" data-act="verFlota">${ICO.llave}Flota${pendFlota?` · ${pendFlota}`:""}</button>
-      <button class="btn ghost" data-act="verArchivo">Archivo</button>
-      <button class="btn ghost" data-act="ajustes">${hayDrive()?"Drive ✓":"Drive"}</button>
+      <button class="btn ghost" data-act="verArchivo">Archivo${hayDrive()?"":" ⚠"}</button>
     </div>
     ${hayDrive()?`<div class="estado-sync" data-nivel="${nivelSync()}">
       ${(()=>{ const n=SYNC.pendientes.size;
@@ -3221,7 +3233,7 @@ document.addEventListener("click", async ev=>{
 
 
   switch(d.act){
-    case "verArchivo": S.vista="archivo"; pinta(); break;
+    case "verArchivo": S.vista="archivo"; S.abrirDrive=false; pinta(); break;
     case "ganarYo":
       S.baseAct = Date.now(); cierraModal();
       if(S.r){ S.r.act = Date.now(); await guardaFicha(true); }
@@ -3250,7 +3262,7 @@ document.addEventListener("click", async ev=>{
       if(!okF && hayDrive()) flash("La flota no se pudo leer: "+(FLOTA_SYNC.error||"revisa la conexión"));
       pinta(true);
       break; }
-    case "ajustes": S.vista="ajustes"; pinta(); break;
+    case "ajustes": S.vista="archivo"; S.abrirDrive=true; pinta(); break;
     case "irInicio": S.vista="inicio"; S.r=null; S.veh=null; pinta(); break;
     case "guardarYa": {
       if(!S.r) break;
