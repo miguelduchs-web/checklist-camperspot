@@ -435,6 +435,15 @@ async function bootstrap(){
   S.indice = ix ? JSON.parse(ix) : [];
   const bo = await St.get("borradas");
   S.borradas = bo ? JSON.parse(bo) : [];
+  /* Lo que quedó sin mandar a la base sobrevive al cierre de la app */
+  const bq = await St.get("bdDesde"); BD.desde = Number(bq) || 0;
+  try{
+    const bp = JSON.parse((await St.get("bdPend")) || "{}");
+    BD.pend.arriendos = new Set(bp.arriendos||[]);
+    BD.pend.vehiculos = new Set(bp.vehiculos||[]);
+    BD.pend.tareas    = new Set(bp.tareas||[]);
+    for(const id of BD.pend.arriendos) SYNC.pendientes.add(id);
+  }catch(e){}
   bajaArriendos(true);
   vigilaRespaldo();
   pinta();
@@ -552,8 +561,12 @@ async function borraFicha(id){
   await St.del("r:"+id);
   S.indice=S.indice.filter(x=>x.id!==id);
   S.borradas=(S.borradas||[]).concat([{id, t:Date.now()}]);
+  BD.pend.arriendos.delete(id);
   await guardaIndice();
-  subeArriendos();
+  if(await hayBase()){
+    try{ await api("/db/borrar", { tabla:"arriendos", llaves:[id], equipo:nombreEquipo() }); }
+    catch(e){ flash("Se borró aquí, pero no se pudo avisar al servidor: "+corta(e.message||e)); }
+  } else subeArriendos();
   if(S.r && S.r.id===id){ S.r=null; S.original=null; S.vista="inicio"; }
   pinta(); flash("Arriendo eliminado");
 }
@@ -1110,12 +1123,34 @@ function fusionaIndice(local, remoto){
            borradas:Object.values(borradas).filter(b=>b.t > Date.now()-180*86400000) };
 }
 
-async function bajaArriendos(silencioso){
+/* El Worker nuevo expone /indice, que resuelve la carpeta en el servidor para
+   que todos los dispositivos lean el mismo archivo. Si el Worker todavía no
+   está actualizado, se usa el camino antiguo en vez de dejar de funcionar.
+   WORKER_VIEJO se recuerda para no reintentar /indice en cada llamada. */
+let WORKER_VIEJO = false;
+const esRutaFaltante = e => /ruta no encontrada|HTTP 404/i.test(String(e&&e.message||e));
+
+async function leeIndice(){
+  if(!WORKER_VIEJO){
+    try{ return await api("/indice"); }
+    catch(e){ if(!esRutaFaltante(e)) throw e; WORKER_VIEJO = true; }
+  }
+  const carpetaId = await carpetaEstado();
+  return await api(`/json?carpetaId=${encodeURIComponent(carpetaId)}&nombre=indice.json`);
+}
+async function escribeIndice(contenido){
+  if(!WORKER_VIEJO){
+    try{ return await api("/indice", { contenido }); }
+    catch(e){ if(!esRutaFaltante(e)) throw e; WORKER_VIEJO = true; }
+  }
+  const carpetaId = await carpetaEstado();
+  return await api("/json", { carpetaId, nombre:"indice.json", contenido });
+}
+
+async function bajaArriendosDrive(silencioso){
   if(!hayDrive() || !navigator.onLine) return;
   try{
-    /* /indice resuelve la carpeta en el servidor, así que todos los
-       dispositivos leen el mismo archivo pase lo que pase con su caché. */
-    const d = await api("/indice");
+    const d = await leeIndice();
     const antes = S.indice.length;
     const r = fusionaIndice(S.indice, d && d.contenido);
     S.indice = r.lista; S.borradas = r.borradas;
@@ -1147,15 +1182,15 @@ async function subeArriendos(){
     if(!SYNC.pendientes.size) return !SYNC.error;   // la otra subida se llevó todo
   }
   if(SYNC.subiendo) return false;
-  SUBIDA_EN_VUELO = subeArriendosYa();
+  SUBIDA_EN_VUELO = subeArriendosSegunDestino();
   try{ return await SUBIDA_EN_VUELO; }
   finally{ SUBIDA_EN_VUELO = null; }
 }
-async function subeArriendosYa(){
+async function subeArriendosDrive(){
   SYNC.subiendo = true;
   const subidos = [];          // no se descuentan hasta que el índice quede escrito
   try{
-    const d = await api("/indice");            // la carpeta la resuelve el servidor
+    const d = await leeIndice();               // la carpeta la resuelve el servidor
     const remoto = new Map(((d&&d.contenido&&d.contenido.lista)||[]).map(f=>[f.id,f]));
 
     for(const id of [...SYNC.pendientes]){
@@ -1183,7 +1218,7 @@ async function subeArriendosYa(){
     /* El índice es lo que el otro dispositivo lee: si esto falla, nada se dio
        por subido. Antes se descontaba la ficha aquí arriba y el aviso quedaba
        en verde con el índice sin escribir. */
-    await api("/indice", { contenido:{ v:1, act:Date.now(), lista:S.indice, borradas:S.borradas } });
+    await escribeIndice({ v:1, act:Date.now(), lista:S.indice, borradas:S.borradas });
 
     subidos.forEach(id=>SYNC.pendientes.delete(id));
     await guardaIndice();
@@ -1270,16 +1305,21 @@ async function guardaYSube(){
   if(!hayDrive())        return { local, drive:false, motivo:"sin Drive" };
   if(!navigator.onLine)  return { local, drive:false, motivo:"sin conexión" };
   const ok = await subeArriendos();
+  /* Un choque no es un éxito: tu cambio NO quedó. Decirlo claro, porque
+     la app ya mostró el aviso para que elijas qué versión conservar. */
+  if(BD.choques.has(S.r.id))
+    return { local, drive:false, motivo:"choque" };
   return { local, drive:!!ok, motivo: ok ? "" : (SYNC.error || "falló la subida") };
 }
 
 /* El texto que corresponde al resultado de guardaYSube */
 function avisoGuardado(res, alSalir){
   if(!res.local) return "No había nada que guardar";
-  if(res.drive)  return alSalir ? "Guardado y subido a Drive" : "Subido a Drive";
+  if(res.drive)  return alSalir ? "Guardado y sincronizado" : "Sincronizado";
+  if(res.motivo==="choque") return "Otra persona guardó esta ficha · elige qué versión conservar";
   if(res.motivo==="sin conexión") return "Guardado aquí · se sube solo al volver la conexión";
   if(res.motivo==="sin Drive")    return "Guardado solo en este dispositivo";
-  return "Guardado aquí · aún no sube a Drive: "+res.motivo;
+  return "Guardado aquí · aún no se sincroniza: "+res.motivo;
 }
 
 /* Al abrir una ficha que este dispositivo no tiene, se baja de su carpeta */
@@ -1413,7 +1453,7 @@ async function cargaFlota(){
   }
 }
 
-async function bajaFlota(silencioso){
+async function bajaFlotaDrive(silencioso){
   if(!hayDrive() || !navigator.onLine) return false;
   try{
     const d = await api("/estado");
@@ -1440,7 +1480,7 @@ async function guardaFlota(){
   guardaFlota._t = setTimeout(subeFlota, 700);
 }
 
-async function subeFlota(){
+async function subeFlotaDrive(){
   if(!hayDrive() || !navigator.onLine || FLOTA_SYNC.subiendo) return;
   const soloRelleno = Object.values(FLOTA.veh||{}).every(v=>v.provisional)
                       && !FLOTA.tareas.length;
@@ -1460,9 +1500,283 @@ async function subeFlota(){
   }
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   DATOS DE OPERACIÓN EN LA BASE (D1)
+
+   Reemplaza el índice y el archivo de flota que vivían en Drive. La
+   diferencia de fondo: aquí hay UNA copia y el servidor manda. Pone la
+   hora (los relojes de los equipos ya no compiten) y lleva el número
+   de versión de cada fila, así que si dos personas editan lo mismo se
+   detecta de verdad en vez de que una pise a la otra en silencio.
+
+   Drive sigue guardando fotos, videos y un ficha.json por arriendo.
+   IndexedDB sigue siendo la copia para trabajar sin señal.
+
+   Si la base no está conectada, todo cae al camino antiguo de Drive,
+   para que la app nunca quede inutilizable.
+   ══════════════════════════════════════════════════════════════════ */
+
+let BD = {
+  hay: null,              // null = no se ha probado todavía
+  desde: 0,               // hora del último cambio que ya trajimos
+  equipo: "",             // este dispositivo, para saber quién escribió
+  pend: { arriendos:new Set(), vehiculos:new Set(), tareas:new Set() },
+  choques: new Set(),     // filas que otra persona guardó después que nosotros
+  subiendo: false,
+  error: "",
+  importado: false,
+};
+
+function nombreEquipo(){
+  if(BD.equipo) return BD.equipo;
+  const ua = navigator.userAgent||"";
+  BD.equipo = (/iPhone|iPad|Android/i.test(ua) ? "telefono" : "computador")
+              + "-" + Math.random().toString(36).slice(2,6);
+  return BD.equipo;
+}
+
+/* ¿Hay base conectada? Se pregunta una vez por sesión. */
+async function hayBase(){
+  if(BD.hay !== null) return BD.hay;
+  if(!hayDrive() || !navigator.onLine) return false;
+  try{
+    const d = await api("/db/estado");
+    BD.hay = !!(d && d.ok && d.tablas);        // una respuesta reconocible, no cualquier ok
+    if(d && d.importado) BD.importado = true;
+  }catch(e){
+    BD.hay = false;                     // Worker viejo o base sin vincular
+  }
+  return BD.hay;
+}
+
+/* ---------- traer lo que cambió ---------- */
+async function bajaDeBase(silencioso){
+  const d = await api("/db/cambios?desde="+BD.desde);
+  let nuevos = 0;
+
+  for(const f of d.arriendos||[]){
+    const i = S.indice.findIndex(x=>x.id===f.id);
+    if(f.borrado){
+      if(i>=0) S.indice.splice(i,1);
+      await St.del("r:"+f.id);
+      if(S.r && S.r.id===f.id){ S.r=null; if(S.vista==="ficha") S.vista="inicio"; }
+      continue;
+    }
+    const r = { ...(f.datos||{}), id:f.id, ver:f.ver };
+    await St.set("r:"+f.id, JSON.stringify(r));
+    const res = { ...resumenDe(r), ver:f.ver, act:f.act };
+    if(i<0){ S.indice.unshift(res); nuevos++; } else S.indice[i] = res;
+    /* Si el arriendo abierto cambió en el servidor y aquí no hay nada sin
+       guardar, se refresca. Si hay cambios locales, no se pisan. */
+    if(S.r && S.r.id===f.id && !BD.pend.arriendos.has(f.id)) S.r = r;
+  }
+
+  for(const f of d.vehiculos||[]){
+    if(f.borrado){ delete FLOTA.veh[f.patente]; continue; }
+    if(BD.pend.vehiculos.has(f.patente)) continue;      // lo nuestro aún no sube
+    FLOTA.veh[f.patente] = { ...(f.datos||{}), patente:f.patente,
+                             suc:f.suc||"Santiago", ver:f.ver, act:f.act };
+  }
+
+  for(const f of d.tareas||[]){
+    const i = (FLOTA.tareas||[]).findIndex(t=>t.id===f.id);
+    if(f.borrado){ if(i>=0) FLOTA.tareas.splice(i,1); continue; }
+    if(BD.pend.tareas.has(f.id)) continue;
+    const t = { ...(f.datos||{}), id:f.id, patente:f.patente,
+                estado:f.estado, tipo:f.tipo, ver:f.ver, act:f.act };
+    if(i<0) FLOTA.tareas.push(t); else FLOTA.tareas[i] = t;
+  }
+
+  BD.desde = d.hora || BD.desde;
+  BD.error = ""; SYNC.error = ""; FLOTA_SYNC.error = "";
+  SYNC.ultimo = Date.now(); FLOTA_SYNC.ultimo = Date.now();
+  await guardaIndice();
+  await St.set("flotaEstado", JSON.stringify(FLOTA));
+  await St.set("bdDesde", String(BD.desde));
+  if(!silencioso) flash(nuevos ? nuevos+" arriendo(s) nuevo(s)" : "Al día");
+  if(/^(inicio|archivo|flota|vehiculo)$/.test(S.vista)) pinta(true);
+  return nuevos;
+}
+
+/* ---------- mandar lo que falta ---------- */
+async function subeABase(){
+  if(BD.subiendo) return false;
+  BD.subiendo = true;
+  BD.choques.clear();
+  try{
+    if(BD.pend.arriendos.size){
+      const filas = [];
+      for(const id of [...BD.pend.arriendos]){
+        const raw = await St.get("r:"+id);
+        if(!raw){ BD.pend.arriendos.delete(id); continue; }
+        const r = JSON.parse(raw);
+        if(!r.patente && !r.cliente){ BD.pend.arriendos.delete(id); continue; }
+        filas.push({ id, suc:r.suc, patente:r.patente, cliente:r.cliente, fi:r.fi, ft:r.ft,
+                     estado:r.estado, carpeta:nombreCarpeta(r), drive_id:r.driveCarpeta||"",
+                     ver:Number(r.ver)||0, datos:r });
+      }
+      if(filas.length) await mandaFilas("arriendos", filas, "id", BD.pend.arriendos);
+    }
+
+    /* Los vehículos provisionales de fábrica NUNCA se mandan: son relleno
+       para que la app no se vea vacía y no deben pisar datos reales. */
+    const veh = Object.values(FLOTA.veh||{})
+      .filter(v=>BD.pend.vehiculos.has(v.patente) && !v.provisional);
+    if(veh.length) await mandaFilas("vehiculos",
+      veh.map(v=>({ patente:v.patente, suc:v.suc, ver:Number(v.ver)||0, datos:v })),
+      "patente", BD.pend.vehiculos);
+
+    const tar = (FLOTA.tareas||[]).filter(t=>BD.pend.tareas.has(t.id));
+    if(tar.length) await mandaFilas("tareas",
+      tar.map(t=>({ id:t.id, patente:t.patente, estado:t.estado, tipo:t.tipo,
+                    ver:Number(t.ver)||0, datos:t })),
+      "id", BD.pend.tareas);
+
+    BD.error = ""; SYNC.error = ""; FLOTA_SYNC.error = "";
+    if(!BD.pend.arriendos.size) SYNC.ultimo = Date.now();
+    if(!BD.pend.vehiculos.size && !BD.pend.tareas.size){
+      FLOTA_SYNC.sucio = false; FLOTA_SYNC.ultimo = Date.now();
+    }
+    return true;
+  }catch(e){
+    BD.error = corta(e.message||e); SYNC.error = BD.error;
+    return false;
+  }finally{
+    BD.subiendo = false;
+    try{ await St.set("bdPend", JSON.stringify({ arriendos:[...BD.pend.arriendos],
+      vehiculos:[...BD.pend.vehiculos], tareas:[...BD.pend.tareas] })); }catch(e){}
+  }
+}
+
+async function mandaFilas(tabla, filas, llave, pendientes){
+  const d = await api("/db/guardar", { tabla, filas, equipo:nombreEquipo() });
+  for(const g of d.guardadas||[]){
+    pendientes.delete(g[llave]);
+    await anotaVersion(tabla, g[llave], g.ver, g.act);
+  }
+  /* Choque: alguien guardó esto mismo después que nosotros. No se pisa
+     ninguna de las dos versiones, se le pregunta a la persona. */
+  for(const c of d.choques||[]){
+    pendientes.delete(c[llave]);
+    BD.choques.add(c[llave]);
+    if(tabla==="arriendos" && c.suyo)
+      avisaChoque(c[llave], { ...(c.suyo.datos||{}), ver:c.suyo.ver, act:c.suyo.act });
+    else if(c.suyo)
+      await anotaVersion(tabla, c[llave], c.suyo.ver, c.suyo.act, c.suyo.datos);
+  }
+}
+
+async function anotaVersion(tabla, llave, ver, act, datos){
+  if(tabla==="arriendos"){
+    const raw = await St.get("r:"+llave);
+    if(raw){ const r = JSON.parse(raw); r.ver = ver;
+             await St.set("r:"+llave, JSON.stringify(r));
+             if(S.r && S.r.id===llave) S.r.ver = ver; }
+    const i = S.indice.findIndex(x=>x.id===llave);
+    if(i>=0){ S.indice[i].ver = ver; S.indice[i].act = act; }
+    await guardaIndice();
+  } else if(tabla==="vehiculos"){
+    const v = FLOTA.veh[llave];
+    if(v) Object.assign(v, datos||{}, { ver, act, sucio:false });
+  } else {
+    const t = (FLOTA.tareas||[]).find(x=>x.id===llave);
+    if(t) Object.assign(t, datos||{}, { ver, act });
+  }
+}
+
+/* ---------- carga inicial, una sola vez ---------- */
+async function importaABase(){
+  if(BD.importado) return false;
+  const arriendos = [];
+  for(const res of S.indice){
+    const raw = await St.get("r:"+res.id);
+    if(!raw) continue;
+    const r = JSON.parse(raw);
+    arriendos.push({ id:r.id, suc:r.suc, patente:r.patente, cliente:r.cliente,
+                     fi:r.fi, ft:r.ft, estado:r.estado, carpeta:nombreCarpeta(r),
+                     drive_id:r.driveCarpeta||"", datos:r });
+  }
+  const vehiculos = Object.values(FLOTA.veh||{}).filter(v=>!v.provisional)
+    .map(v=>({ patente:v.patente, suc:v.suc, datos:v }));
+  const tareas = (FLOTA.tareas||[])
+    .map(t=>({ id:t.id, patente:t.patente, estado:t.estado, tipo:t.tipo, datos:t }));
+  BD.importado = true;                        // se intenta una sola vez por sesión
+  if(!arriendos.length && !vehiculos.length && !tareas.length) return false;
+  try{
+    const d = await api("/db/importar", { arriendos, vehiculos, tareas });
+    const n = d.importado||{};
+    flash("Datos cargados a la base: "+(n.arriendos||0)+" arriendo(s), "
+          +(n.vehiculos||0)+" vehículo(s), "+(n.tareas||0)+" tarea(s)");
+    return true;
+  }catch(e){
+    /* Ya se había importado: otro equipo subió los datos primero y a
+       este le toca bajarlos. No es un error. */
+    return false;
+  }
+}
+
+/* Borrar en la base es marcar la fila, así el borrado alcanza a los
+   otros dispositivos. Antes esto se hacía con "lápidas" locales y por eso
+   las tareas borradas reaparecían. */
+async function borraEnBase(tabla, llaves){
+  const lista = (llaves||[]).filter(Boolean);
+  if(!lista.length) return;
+  for(const k of lista){ BD.pend.vehiculos.delete(k); BD.pend.tareas.delete(k); }
+  if(!(await hayBase())) return;
+  try{ await api("/db/borrar", { tabla, llaves:lista, equipo:nombreEquipo() }); }
+  catch(e){ flash("Se borró aquí, pero no se pudo avisar al servidor: "+corta(e.message||e)); }
+}
+
+/* ---------- despachadores: la base si está, Drive si no ---------- */
+async function bajaArriendos(silencioso){
+  if(!(await hayBase())) return bajaArriendosDrive(silencioso);
+  try{
+    if(!BD.importado) await importaABase();
+    await bajaDeBase(silencioso);
+    if(BD.pend.arriendos.size || BD.pend.vehiculos.size || BD.pend.tareas.size)
+      await subeABase();
+    return true;
+  }catch(e){
+    BD.error = corta(e.message||e); SYNC.error = BD.error;
+    if(!silencioso) flash("No se pudo sincronizar: "+BD.error);
+    return false;
+  }
+}
+async function subeArriendosSegunDestino(){
+  if(!(await hayBase())) return subeArriendosDrive();
+  for(const id of SYNC.pendientes) BD.pend.arriendos.add(id);
+  SYNC.pendientes.clear();
+  const ok = await subeABase();
+  /* Lo que no se pudo mandar vuelve a la cola que muestra el pie */
+  for(const id of BD.pend.arriendos) SYNC.pendientes.add(id);
+  if(ok) await respaldaEnDrive();
+  return ok;
+}
+async function bajaFlota(silencioso){
+  if(!(await hayBase())) return bajaFlotaDrive(silencioso);
+  return bajaArriendos(silencioso);          // una sola llamada trae todo
+}
+async function subeFlota(){
+  if(!(await hayBase())) return subeFlotaDrive();
+  for(const v of Object.values(FLOTA.veh||{}))
+    if(!v.provisional) BD.pend.vehiculos.add(v.patente);
+  for(const t of FLOTA.tareas||[]) if(t.sucio) BD.pend.tareas.add(t.id);
+  return subeABase();
+}
+
+/* El respaldo legible en Drive: un ficha.json por arriendo. No es la
+   fuente de verdad, pero deja todo revisable desde Drive. */
+async function respaldaEnDrive(){
+  if(!hayDrive() || !navigator.onLine || !S.r) return;
+  try{
+    const carp = await carpetaSub(S.r, "Ficha");
+    await api("/json", { carpetaId:carp, nombre:"ficha.json", contenido:S.r });
+  }catch(e){ /* el respaldo nunca debe hacer fallar el guardado */ }
+}
+
 function nuevaTarea(patente, datos){
   const t = { id:uid(), patente, tipo:"reparacion", titulo:"", detalle:"", estado:"pendiente",
-              fotos:[], creado:Date.now(), act:Date.now(), ...datos };
+              fotos:[], creado:Date.now(), act:Date.now(), sucio:true, ...datos };
   FLOTA.tareas.push(t);
   guardaFlota();
   return t;
@@ -1494,7 +1808,7 @@ async function liberaFotosViejas(){
 
 async function tocaTarea(id, cambios){
   const t = FLOTA.tareas.find(x=>x.id===id); if(!t) return null;
-  Object.assign(t, cambios, { act:Date.now(), auto:false });
+  Object.assign(t, cambios, { act:Date.now(), auto:false, sucio:true });
   await guardaFlota();
   return t;
 }
@@ -1580,6 +1894,7 @@ async function danosAFlota(r){
     const ids = new Set(sobran.map(t=>t.id));
     ids.forEach(id=>FLOTA.bajas["t:"+id]=Date.now());
     FLOTA.tareas = FLOTA.tareas.filter(t=>!ids.has(t.id));
+    borraEnBase("tareas", [...ids]);
     cambio = true;
   }
 
@@ -1612,8 +1927,26 @@ async function diagSync(){
   }catch(e){ L.push("Worker no responde: "+corta(e.message)); }
   L.push("");
   try{
-    /* Lo que el SERVIDOR ve. Si dos equipos muestran distinto aquí,
-       están mirando carpetas distintas y eso explica cualquier desajuste. */
+    /* Estado de la base de operación: es la fuente de verdad de los datos */
+    try{
+      const e = await api("/db/estado");
+      L.push("Base de datos: conectada · "+(e.version||"?"));
+      for(const t of Object.keys(e.tablas||{}))
+        L.push("  "+t+": "+e.tablas[t].filas+" fila(s)");
+      L.push("  carga inicial: "+(e.importado ? e.importado : "no hecha"));
+      L.push("  este equipo: "+nombreEquipo());
+      L.push("  corte de sincronización: "+(BD.desde ? new Date(BD.desde).toLocaleString("es-CL") : "desde cero"));
+      const p = BD.pend.arriendos.size + BD.pend.vehiculos.size + BD.pend.tareas.size;
+      L.push("  sin mandar: "+(p ? p+" fila(s)" : "nada"));
+      if(BD.error) L.push("  ⚠ último error: "+BD.error);
+    }catch(e){
+      L.push("Base de datos: NO disponible ("+corta(e.message)+")");
+      L.push("  Los datos están viajando por Drive, que es el camino antiguo.");
+      L.push("  Revisa que el Worker esté actualizado y que la base D1 esté");
+      L.push("  vinculada con el nombre de variable DB.");
+    }
+    L.push("");
+    /* Lo que el SERVIDOR ve en Drive, que ahora solo guarda archivos */
     try{
       const g = await api("/diagnostico");
       L.push("Carpeta raíz (servidor): "+g.raizId);
@@ -1624,7 +1957,7 @@ async function diagSync(){
              +" · flota: "+(g.flota?g.flota.vehiculos+" vehículo(s), "+g.flota.tareas+" tarea(s)":"no existe"));
     }catch(e){ L.push("Diagnóstico del servidor no disponible: "+corta(e.message)
                       +" (¿falta actualizar el Worker?)"); }
-    const d = await api("/indice");
+    const d = await leeIndice();
     if(!d || !d.contenido){ L.push("indice.json: NO EXISTE en Drive"); }
     else {
       const lista = d.contenido.lista||[];
@@ -1797,14 +2130,14 @@ function pintaPie(){
   else if(!existe)
     centro = `<div class="est"><b>${ETAPAS[ix].t} · ${en}/${et}</b>Se guarda al escribir</div>`;
   else if(SYNC.subiendo)
-    centro = `<div class="est"><b>${ETAPAS[ix].t} · ${en}/${et}</b>Subiendo a Drive…</div>`;
+    centro = `<div class="est"><b>${ETAPAS[ix].t} · ${en}/${et}</b>Sincronizando…</div>`;
   else if(porSubir || !hayDrive())
     centro = `<button class="est est-btn" data-act="guardarYa">
         <b>${ETAPAS[ix].t} · ${en}/${et}</b>${hayDrive()
-          ? (navigator.onLine ? "Falta subir · toca para guardar" : "Sin conexión · toca para reintentar")
+          ? (navigator.onLine ? "Falta sincronizar · toca para guardar" : "Sin conexión · toca para reintentar")
           : "Solo en este dispositivo"}</button>`;
   else
-    centro = `<div class="est"><b>${ETAPAS[ix].t} · ${en}/${et}</b>En Drive${
+    centro = `<div class="est"><b>${ETAPAS[ix].t} · ${en}/${et}</b>Sincronizado${
       SYNC.ultimo?" · "+new Date(SYNC.ultimo).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"}):""}</div>`;
   document.getElementById("pieIn").innerHTML=`
     <button class="nav" data-nav="-1" ${ix<=0?"disabled":""} aria-label="Etapa anterior">‹</button>
@@ -2454,9 +2787,12 @@ document.addEventListener("click", async ev=>{
   if(d.deldano){ confirmar("¿Quitar este daño y sus respaldos?", async()=>{ for(const m of (S.r.danos.find(x=>x.id===d.deldano)||{}).fotos||[]) await quitaArchivo(m.id); S.r.danos=S.r.danos.filter(x=>x.id!==d.deldano); await guardaFicha(); pinta(true); }); return; }
   if(d.delveh){ confirmar(`¿Eliminar ${d.delveh} de la flota? Sus tareas también se eliminan.`, async()=>{
       FLOTA.bajas["v:"+d.delveh] = Date.now();
-      FLOTA.tareas.filter(t=>t.patente===d.delveh).forEach(t=>FLOTA.bajas["t:"+t.id]=Date.now());
+      const tareasDel = FLOTA.tareas.filter(t=>t.patente===d.delveh).map(t=>t.id);
+      tareasDel.forEach(id=>FLOTA.bajas["t:"+id]=Date.now());
       delete FLOTA.veh[d.delveh];
       FLOTA.tareas = FLOTA.tareas.filter(t=>t.patente!==d.delveh);
+      await borraEnBase("tareas", tareasDel);
+      await borraEnBase("vehiculos", [d.delveh]);
       S.flota = listaFlota(); await guardaFlota();
       S.vista="flota"; pinta();
     }, "Eliminar"); return; }
@@ -2538,6 +2874,7 @@ document.addEventListener("click", async ev=>{
         for(const f of (t&&t.fotos)||[]) await quitaArchivo(f.id);
         FLOTA.tareas = FLOTA.tareas.filter(x=>x.id!==id);
         FLOTA.bajas["t:"+id] = Date.now();
+        await borraEnBase("tareas", [id]);
         await guardaFlota(); cierraModal(); pinta(true); flash("Tarea eliminada");
       }, "Eliminar"); break; }
     case "salir": {
@@ -2623,7 +2960,7 @@ document.addEventListener("input", ev=>{
   if(d.veh){ const v=FLOTA.veh[d.veh]; if(v){
       v[d.c] = (d.c==="km"||d.c==="kmMant") ? (Number(el.value)||0) : el.value;
       if(d.c==="km") v.kmFecha = hoy();
-      v.act = Date.now(); delete v.provisional; S.flota = listaFlota();
+      v.act = Date.now(); v.sucio = true; delete v.provisional; S.flota = listaFlota();
       clearTimeout(tmr); tmr=setTimeout(guardaFlota, 500);
     } return; }
   if(d.tarc){ const t=buscaTarea(S.tarea); if(t){
