@@ -2778,8 +2778,20 @@ function secPrep(r){
     </div></div>`;
 }
 
+/* Qué falta para poder nombrar la carpeta en Drive. Sin esto la app decía
+   "Preparando carpeta…" aunque no hubiera nada preparándose, y el operario
+   esperaba indefinidamente algo que nunca iba a ocurrir. */
+function faltaParaCarpeta(r){
+  const f=[];
+  if(!r.patente) f.push("la patente");
+  if(!(r.cliente||"").trim()) f.push("el cliente");
+  if(!r.ft && !r.fi) f.push("las fechas");
+  return f;
+}
+
 function secEntrega(r){
   const listas = SLOTS_VIDEO.every(def=>(r.driveSubs||{})["Videos/"+def.carpeta]);
+  const falta = faltaParaCarpeta(r);
   return `<div class="card"><h3>Videos del recorrido</h3>
   <div class="pad" style="padding-bottom:4px">
     <p class="hint" style="margin:0"><b>No esperes en Drive.</b> Aprieta subir y vuelve de inmediato:
@@ -2797,7 +2809,9 @@ function secEntrega(r){
       ${hayDrive() ? (carpetaId
         ? `<a class="btn acento sm" style="text-decoration:none" target="_blank" rel="noopener"
              href="${linkCarpeta(carpetaId)}">Subir en Drive</a>`
-        : `<span class="badge warn">Preparando carpeta…</span>`) : ""}
+        : falta.length
+          ? `<span class="badge bad">Falta ${falta.join(" y ")}</span>`
+          : `<span class="badge warn">Preparando carpeta…</span>`) : ""}
       ${enDrive.length
         ? `<ul class="arch">${enDrive.map(v=>`<li>
             <a href="https://drive.google.com/file/d/${v.id}/view" target="_blank" rel="noopener"><code>${esc(v.nombre)}</code></a>
@@ -2807,16 +2821,20 @@ function secEntrega(r){
   }).join("")}
 
   <div class="pad" style="border-top:1px solid var(--linea)">
-    <p class="hint" style="margin:0">${!listas?"Las carpetas se están creando…":
+    <p class="hint" style="margin:0">${
+      falta.length ? `Para subir videos falta completar ${falta.join(" y ")} en la pestaña Arriendo.` :
+      !listas?"Las carpetas se están creando…":
       cuentaVideos(r)>=SLOTS_VIDEO.length?"Los tres videos están confirmados.":
       S.revisando?"Revisando…":"Se confirma solo cada 20 segundos mientras sigas aquí."}</p>
   </div></div>
 
-  <div class="card"><h3>Tablero y millaje</h3>
+  ${!(cfgTipo(r).tablero || cfgTipo(r).millaje) ? "" : `<div class="card"><h3>${
+      cfgTipo(r).tablero && cfgTipo(r).millaje ? "Tablero y millaje"
+      : cfgTipo(r).tablero ? "Tablero" : "Millaje"}</h3>
     ${cfgTipo(r).tablero ? slotHTML(SLOTS.find(x=>x.k==="f_tab_s"),r) : ""}
     <div class="pad">
     ${cfgTipo(r).millaje ? `<label class="f" style="margin:0"><span>Millaje de salida</span><input type="number" inputmode="numeric" data-set="entrega.km" value="${esc(r.entrega.km)}" placeholder="Ej: 189603"></label>` : ""}
-  </div></div>`;
+  </div></div>`}`;
 }
 
 function secRevision(r){
