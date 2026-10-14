@@ -361,7 +361,7 @@ const ETAPAS = [
 
 /* ══════════ ALMACENAMIENTO ══════════ */
 /* Usa IndexedDB en el navegador. Si corre dentro de un entorno con window.storage, lo prefiere. */
-const MEM = {}; let SIN_DISCO = false;
+const MEM = {}; let SIN_DISCO = false; let FALLOS_DISCO = 0; let ERROR_DISCO = "";
 
 const IDB = {
   db:null,
@@ -389,8 +389,10 @@ const IDB = {
 const NATIVO = typeof window!=="undefined" && !!window.storage;
 
 const St = {
+  /* Leer NUNCA depende de que escribir haya fallado: son operaciones
+     distintas. Antes, un solo guardado fallido dejaba de leer el disco por
+     el resto de la sesión y escondía datos que sí estaban guardados. */
   async get(k){
-    if(SIN_DISCO) return MEM[k]??null;
     try{
       if(NATIVO){ const r=await window.storage.get(k); return r?r.value:null; }
       return await IDB.get(k);
@@ -400,14 +402,21 @@ const St = {
     MEM[k]=v;
     try{
       if(NATIVO) await window.storage.set(k,v); else await IDB.set(k,v);
-    }catch(e){ SIN_DISCO=true; }
+      /* Volvió a funcionar: se levanta el aviso */
+      if(FALLOS_DISCO){ FALLOS_DISCO=0; SIN_DISCO=false; ERROR_DISCO=""; }
+    }catch(e){
+      ERROR_DISCO = String((e && (e.name||e.message)) || e);
+      /* Un fallo aislado suele ser una foto que no cupo, no el disco caído.
+         Se avisa recién tras varios seguidos, y se deshace apenas uno
+         vuelva a funcionar. Antes bastaba uno y el cartel ya no se iba. */
+      if(++FALLOS_DISCO >= 3) SIN_DISCO = true;
+    }
   },
   async del(k){
     delete MEM[k];
     try{ if(NATIVO) await window.storage.delete(k); else await IDB.del(k); }catch(e){}
   },
   async list(p){
-    if(SIN_DISCO) return Object.keys(MEM).filter(k=>k.startsWith(p));
     try{
       if(NATIVO){ const r=await window.storage.list(p); return r?r.keys:[]; }
       return await IDB.list(p);
@@ -2233,6 +2242,17 @@ async function diagSync(){
   const L=[];
   L.push("Dispositivo: "+(window.matchMedia("(display-mode: standalone)").matches?"app instalada":"navegador"));
   L.push("Drive configurado: "+(hayDrive()?"sí":"no"));
+  L.push("Guardado local: "+(SIN_DISCO
+    ? "CON PROBLEMAS · "+FALLOS_DISCO+" fallo(s) seguidos"+(ERROR_DISCO?" · "+ERROR_DISCO:"")
+    : FALLOS_DISCO ? "con "+FALLOS_DISCO+" fallo(s) recientes"+(ERROR_DISCO?" · "+ERROR_DISCO:"")
+    : "normal"));
+  try{
+    if(navigator.storage && navigator.storage.estimate){
+      const e = await navigator.storage.estimate();
+      const mb = n => (n/1048576).toFixed(1)+" MB";
+      L.push("  espacio usado: "+mb(e.usage||0)+" de "+mb(e.quota||0));
+    }
+  }catch(e){}
   L.push("Arriendos en este dispositivo: "+S.indice.length);
   L.push("Esperando subir: "+SYNC.pendientes.size);
   L.push("Bajas registradas: "+((S.borradas||[]).length));
@@ -2514,7 +2534,12 @@ function vistaInicio(){
     </button>`;
 
   app.innerHTML=`
-    ${SIN_DISCO?`<div class="aviso"><b>Sin almacenamiento.</b><br>Los datos de esta sesión no se guardarán.</div>`:""}
+    ${SIN_DISCO?`<div class="aviso"><b>Este dispositivo no está guardando copia local.</b><br>
+      ${BD.hay===true
+        ? "Lo que registres igual se guarda en la base compartida y lo ven los otros equipos."
+        : "Mientras tanto los datos viven solo en esta sesión."}
+      Sin copia local no vas a poder trabajar sin señal. Suele ser falta de espacio en el
+      dispositivo${ERROR_DISCO?` (${esc(ERROR_DISCO)})`:""}.</div>`:""}
     ${hayDrive()?"":`<div class="aviso"><b>Este dispositivo no está conectado a Drive.</b><br>
       No ve los arriendos ni la flota de los demás, y lo que hagas aquí queda solo en él.
       ${location.search?"":"<br>Si ya lo configuraste en otro lado, pide el enlace desde Ajustes → Copiar enlace."}
