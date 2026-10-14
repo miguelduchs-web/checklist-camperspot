@@ -612,6 +612,7 @@ async function abreFicha(id){
      de abrirla, y una ficha pendiente deja de recibir los cambios del otro. */
   if(!S.r.tipo && S.r.patente && FLOTA.veh[S.r.patente] && FLOTA.veh[S.r.patente].tipo)
     S.r.tipo = FLOTA.veh[S.r.patente].tipo;
+  setTimeout(()=>reanudaSubidas(S.r), 400);   // lo que quedó a medio subir
   const etapaLocal = await St.get("etapa:"+id);
   const recordada = etapaLocal || S.r.ultimaEtapa || "";
   if(recordada==="entrega") setTimeout(alistaVideos,300);
@@ -818,6 +819,42 @@ function encolar(r, slot, danoId, media){
   media.estado = "pendiente";
   COLA.push({ id:media.id, fichaId:r.id, slot, danoId, media });
   procesaCola();
+}
+
+/* La cola de subida vive en memoria. Si la app se recarga o se cierra con
+   un archivo en camino, la cola desaparece y ese archivo queda marcado
+   "subiendo" PARA SIEMPRE: nunca se reintenta y nunca llega a Drive, pero
+   la app lo muestra como si estuviera bien. Esto lo retoma al abrir la ficha.
+   Las fotos se pueden recuperar porque sus bytes quedan guardados aquí; los
+   videos no, así que esos se marcan para volver a subirlos a mano. */
+const aMedias = m => m && !m.driveId && /^(subiendo|pendiente|reintento)$/.test(m.estado||"");
+
+async function reanudaSubidas(r){
+  if(!hayDrive() || !navigator.onLine || !r) return 0;
+  const sueltos = [];
+  for(const slot of Object.keys(r.media||{}))
+    for(const m of r.media[slot]||[]) if(aMedias(m)) sueltos.push({slot, danoId:"", m});
+  for(const d of r.danos||[])
+    for(const m of d.fotos||[]) if(aMedias(m)) sueltos.push({slot:"", danoId:d.id, m});
+
+  let n = 0;
+  for(const {slot, danoId, m} of sueltos){
+    if(COLA.some(x=>x.id===m.id)) continue;             // ya está en camino
+    if(!ARCHIVOS[m.id]){
+      const dato = await St.get("f:"+m.id);
+      if(dato) FOTOS[m.id] = dato;
+      else {                                            // un video: sus bytes no se guardan
+        m.estado = "error";
+        m.detalle = "se interrumpió al cerrar la app · vuelve a subirlo";
+        continue;
+      }
+    }
+    encolar(r, slot, danoId, m);
+    n++;
+  }
+  if(sueltos.length){ await guardaFicha(); if(S.r && S.r.id===r.id) pintaSubidas(); }
+  if(n) flash(n===1 ? "Retomando una subida que quedó a medias" : `Retomando ${n} subidas que quedaron a medias`);
+  return n;
 }
 
 let ACTIVAS = 0;
@@ -3337,6 +3374,7 @@ document.addEventListener("visibilitychange", ()=>{
      sale a la cámara y vuelve. Antes solo se sincronizaba si estaba en la
      pantalla de inicio, que es justo donde menos falta hace. */
   sincronizaAhora(true);
+  if(S.r) reanudaSubidas(S.r);
   if(S.vista==="ficha" && S.r) pintaPie();
 });
 /* En iPhone, al cerrar la app web solo llega pagehide, no visibilitychange */
