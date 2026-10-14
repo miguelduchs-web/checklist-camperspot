@@ -1277,14 +1277,22 @@ function vigilaRespaldo(){
     if(!navigator.onLine || !hayDrive()) return;
     if(SYNC.pendientes.size && !SYNC.subiendo) subeArriendos();
     if(FLOTA_SYNC.sucio && !FLOTA_SYNC.subiendo) subeFlota();
-    /* También se baja cada tanto: si el otro dispositivo agregó algo,
-       conviene que aparezca sin tener que apretar nada. */
-    if(!SYNC.subiendo && !SYNC.pendientes.size && Date.now()-(SYNC.ultimo||0) > 90000){
-      bajaArriendos(true); bajaFlota(true);
-    }
+    /* Buscar lo que hicieron los otros. El intervalo era de 90 s porque cada
+       consulta eran varias idas y vueltas a Google Drive; con la base de datos
+       es UNA consulta con índice que no devuelve nada cuando no hay cambios,
+       así que no hay razón para hacer esperar a nadie dos minutos. */
+    if(!SYNC.subiendo && !SYNC.pendientes.size) sincronizaAhora();
     if(S.vista==="inicio" && document.querySelector(".estado-sync")) pinta(true);
     if(S.vista==="ficha" && S.r) pintaPie();   // el pie muestra si falta subir
-  }, 30000);
+  }, 10000);
+}
+
+/* Una sola llamada trae arriendos, vehículos y tareas. Antes se llamaba a
+   las dos y, con la base conectada, eso consultaba lo mismo dos veces. */
+async function sincronizaAhora(silencioso){
+  const ok = await bajaArriendos(silencioso===undefined ? true : silencioso);
+  if(!(await hayBase())) await bajaFlotaDrive(true);   // sin base, la flota va aparte
+  return ok;
 }
 
 /* Dos personas en la misma ficha a la vez. Poco probable con este volumen,
@@ -1608,6 +1616,7 @@ async function hayBase(){
 
 /* ---------- traer lo que cambió ---------- */
 async function bajaDeBase(silencioso){
+  let refrescarFicha = false;
   /* Se pide con dos segundos de traslape. Un cambio que ocurra en el mismo
      milisegundo que la respuesta anterior quedaba justo en el borde y ese
      dispositivo no lo veía nunca más. Volver a aplicar algo ya aplicado no
@@ -1632,7 +1641,14 @@ async function bajaDeBase(silencioso){
     await St.set("r:"+f.id, JSON.stringify(r));
     const res = { ...resumenDe(r), ver:f.ver, act:f.act };
     if(i<0){ S.indice.unshift(res); nuevos++; } else S.indice[i] = res;
-    if(S.r && S.r.id===f.id) S.r = r;
+    /* La ficha abierta se refresca sola, pero NUNCA encima de algo escrito
+       que aún no alcanzó a guardarse: entre tecla y guardado hay medio
+       segundo, y ahí se podía perder lo recién escrito. */
+    if(S.r && S.r.id===f.id && !hayCambios()){
+      S.r = r;
+      S.original = JSON.stringify(r);
+      refrescarFicha = true;
+    }
   }
 
   for(const f of d.vehiculos||[]){
@@ -1658,7 +1674,11 @@ async function bajaDeBase(silencioso){
   await St.set("flotaEstado", JSON.stringify(FLOTA));
   await St.set("bdDesde", String(BD.desde));
   if(!silencioso) flash(nuevos ? nuevos+" arriendo(s) nuevo(s)" : "Al día");
-  if(/^(inicio|archivo|flota|vehiculo)$/.test(S.vista)) pinta(true);
+  /* Si cambió la ficha que alguien tiene en pantalla, se repinta para que no
+     siga mirando datos viejos. pinta(true) ya se aguanta si hay un campo con
+     el cursor puesto, así no se cierra el teclado a media palabra. */
+  if(/^(inicio|archivo|flota|vehiculo)$/.test(S.vista) || (S.vista==="ficha" && refrescarFicha))
+    pinta(true);
   return nuevos;
 }
 
@@ -3195,7 +3215,10 @@ async function alOcultar(){
 document.addEventListener("visibilitychange", ()=>{
   if(document.hidden){ alOcultar(); return; }
   if(S.r && S.vista==="ficha" && S.etapa==="entrega") revisaVideosDrive(true);
-  if(S.vista==="inicio") bajaArriendos(true);
+  /* Volver a la app es el mejor momento para ponerse al día: el operario
+     sale a la cámara y vuelve. Antes solo se sincronizaba si estaba en la
+     pantalla de inicio, que es justo donde menos falta hace. */
+  sincronizaAhora(true);
   if(S.vista==="ficha" && S.r) pintaPie();
 });
 /* En iPhone, al cerrar la app web solo llega pagehide, no visibilitychange */
