@@ -483,8 +483,12 @@ async function guardaFicha(forzar){
   await guardaIndice();
   marcaParaSubir(r.id);
   S.guardado=Date.now(); pintaPie();
+  /* Daños Y millaje pasan a la flota en cada guardado. Antes el millaje
+     solo se traspasaba al CERRAR el arriendo, así que escribirlo no se
+     reflejaba en la flota hasta mucho después. */
   if(r.patente){ clearTimeout(guardaFicha._flota);
-    guardaFicha._flota = setTimeout(()=>danosAFlota(r), 900); }
+    guardaFicha._flota = setTimeout(async()=>{
+      await danosAFlota(r); await millajeAFlota(r); }, 900); }
   if(hayDrive() && datosListos(r) && !PREPARANDO &&
      SLOTS_VIDEO.some(def=>!(r.driveSubs||{})["Videos/"+def.carpeta]))
     setTimeout(alistaVideos, 0);
@@ -631,6 +635,9 @@ async function subir(slotKey, files, danoId){
     }
   }
   await guardaFicha(); pinta();
+  /* Cierra el "Procesando…", que antes quedaba puesto para siempre y
+     parecía que la carga nunca terminaba aunque ya estuviera lista. */
+  flash(arr.length>1 ? arr.length+" archivos agregados" : "Archivo agregado");
 }
 function push(slot,item,danoId){
   const r=S.r;
@@ -1680,7 +1687,7 @@ async function anotaVersion(tabla, llave, ver, act, datos){
     if(v) Object.assign(v, datos||{}, { ver, act, sucio:false });
   } else {
     const t = (FLOTA.tareas||[]).find(x=>x.id===llave);
-    if(t) Object.assign(t, datos||{}, { ver, act });
+    if(t) Object.assign(t, datos||{}, { ver, act, sucio:false });
   }
 }
 
@@ -1758,8 +1765,10 @@ async function bajaFlota(silencioso){
 }
 async function subeFlota(){
   if(!(await hayBase())) return subeFlotaDrive();
+  /* Solo lo que cambió. Mandar los cinco vehículos en cada sincronización
+     les subía la versión sin motivo y hacía rebotar cambios entre equipos. */
   for(const v of Object.values(FLOTA.veh||{}))
-    if(!v.provisional) BD.pend.vehiculos.add(v.patente);
+    if(!v.provisional && v.sucio) BD.pend.vehiculos.add(v.patente);
   for(const t of FLOTA.tareas||[]) if(t.sucio) BD.pend.tareas.add(t.id);
   return subeABase();
 }
@@ -1841,12 +1850,20 @@ function faltantes(r){
 
 /* El millaje de llegada pasa a ser el millaje actual del vehículo.
    Solo sube: un error de tipeo hacia abajo no borra el kilometraje real. */
+/* El millaje del vehículo se actualiza con la lectura más alta del
+   arriendo, venga de la salida o de la llegada. Nunca retrocede: si
+   alguien escribe un número menor al que ya tiene la flota, se ignora. */
 async function millajeAFlota(r){
-  const km = Number(r.reporte && r.reporte.km) || 0;
+  const salida  = Number(r.entrega && r.entrega.km) || 0;
+  const llegada = Number(r.reporte && r.reporte.km) || 0;
+  const km = Math.max(salida, llegada);
   if(!km || !r.patente) return false;
   const v = FLOTA.veh[r.patente];
   if(!v || km <= (Number(v.km)||0)) return false;
-  v.km = km; v.kmFecha = r.ft || hoy(); v.act = Date.now();
+  v.km = km;
+  v.kmFecha = (llegada >= salida ? r.ft : r.fi) || hoy();
+  v.act = Date.now();
+  v.sucio = true;                       // sin esto no viaja a los otros equipos
   S.flota = listaFlota();
   await guardaFlota();
   return true;
@@ -1870,7 +1887,7 @@ async function danosAFlota(r){
       FLOTA.tareas.push({ id:uid(), patente:r.patente, tipo:"reparacion",
         titulo, detalle: detalle||"", estado:"pendiente", auto:true, fotos,
         origen:{ clave, fichaId:r.id, arriendo, carpetaId:r.driveCarpeta||"" },
-        creado:Date.now(), act:Date.now() });
+        creado:Date.now(), act:Date.now(), sucio:true });
       n++; cambio = true;
       return;
     }
@@ -1880,7 +1897,7 @@ async function danosAFlota(r){
                        (ya.fotos||[]).length !== fotos.length;
       if(distinto){ ya.titulo=titulo; ya.detalle=detalle||""; ya.fotos=fotos;
                     ya.origen.carpetaId = r.driveCarpeta||ya.origen.carpetaId;
-                    ya.act=Date.now(); cambio = true; }
+                    ya.act=Date.now(); ya.sucio=true; cambio = true; }
     }
   };
 
@@ -2972,7 +2989,7 @@ document.addEventListener("input", ev=>{
       t.auto = false;
       if(d.tarc==="estado" && el.value==="listo" && !t.cerrado) t.cerrado=Date.now();
       if(d.tarc==="estado" && el.value!=="listo") t.cerrado=0;
-      t.act=Date.now(); clearTimeout(tmr); tmr=setTimeout(guardaFlota, 500);
+      t.act=Date.now(); t.sucio=true; clearTimeout(tmr); tmr=setTimeout(guardaFlota, 500);
     } return; }
   if(d.dano){ const x=S.r.danos.find(y=>y.id===d.dano); if(x){ x[d.c]=el.value; deb(); } return; }
   if(d.set){ const ruta=d.set.split("."); let o=S.r;
@@ -3096,7 +3113,7 @@ function modalVehiculo(){
     const pat=i.value.toUpperCase().trim();
     if(!pat) return flash("Escribe la patente");
     if(FLOTA.veh[pat]) return flash("Esa patente ya existe");
-    FLOTA.veh[pat] = {patente:pat, suc:document.getElementById("nvSuc").value, rt:"", permiso:"", act:Date.now()};
+    FLOTA.veh[pat] = {patente:pat, suc:document.getElementById("nvSuc").value, rt:"", permiso:"", act:Date.now(), sucio:true};
     S.flota = listaFlota(); await guardaFlota();
     cierraModal(); pinta(); flash(pat+" agregada");
   };
@@ -3168,7 +3185,10 @@ function flash(msg,fijo){
     e.style.cssText="position:fixed;left:50%;transform:translateX(-50%);bottom:78px;background:#26380B;color:#fff;padding:9px 15px;border-radius:4px;font-size:14px;z-index:80;pointer-events:none";
     document.body.appendChild(e); }
   e.textContent=msg; e.style.opacity="1";
-  clearTimeout(e._t); if(!fijo) e._t=setTimeout(()=>e.style.opacity="0",1900);
+  clearTimeout(e._t);
+  /* Los avisos "fijos" igual se borran a los 30 s. Si una operación tarda
+     más que eso, algo falló y dejar el cartel puesto solo confunde. */
+  e._t = setTimeout(()=>e.style.opacity="0", fijo ? 30000 : 1900);
 }
 
 (function(){ const l=document.querySelector(".logo");
