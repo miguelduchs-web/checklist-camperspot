@@ -508,6 +508,14 @@ async function guardaFicha(forzar){
      SLOTS_VIDEO.some(def=>!(r.driveSubs||{})["Videos/"+def.carpeta]))
     setTimeout(alistaVideos, 0);
 }
+/* Guarda la pestaña actual SOLO en este dispositivo: no toca la ficha
+   compartida, así que navegar ya no le sube la versión a nadie. */
+function recuerdaEtapa(){
+  if(!S.r) return;
+  S.r.ultimaEtapa = S.etapa;
+  try{ St.set("etapa:"+S.r.id, S.etapa); }catch(e){}
+}
+
 async function abreFicha(id){
   let raw = await St.get("r:"+id);
   if(!raw){
@@ -538,8 +546,14 @@ async function abreFicha(id){
     if(m.tipo==="foto" && !FOTOS[m.id]){ const x=await St.get("f:"+m.id); if(x) FOTOS[m.id]=x; }
     if(m.thumb && !THUMBS[m.id]){ const x=await St.get("t:"+m.id); if(x) THUMBS[m.id]=x; }
   }
-  if((S.r.ultimaEtapa||"")==="entrega") setTimeout(alistaVideos,300);
-  S.etapa = (S.r.ultimaEtapa && ETAPAS.some(e=>e.k===S.r.ultimaEtapa)) ? S.r.ultimaEtapa : faseDe(S.r).etapa;
+  /* En qué pestaña quedaste es cosa de ESTE equipo. Antes viajaba dentro de
+     la ficha, así que navegar entre pestañas contaba como editar y le subía
+     la versión a todos: quien estuviera trabajando quedaba desactualizado y
+     su guardado terminaba rechazado. */
+  const etapaLocal = await St.get("etapa:"+id);
+  const recordada = etapaLocal || S.r.ultimaEtapa || "";
+  if(recordada==="entrega") setTimeout(alistaVideos,300);
+  S.etapa = (recordada && ETAPAS.some(e=>e.k===recordada)) ? recordada : faseDe(S.r).etapa;
   S.original = raw;            // copia intacta, para poder salir sin guardar
   S.baseAct = (S.indice.find(x=>x.id===id)||{}).act || S.r.act || 0;
   pinta();
@@ -1326,10 +1340,13 @@ async function guardaYSube(){
   const local = S.indice.some(x=>x.id===S.r.id);
   if(!hayDrive())        return { local, drive:false, motivo:"sin Drive" };
   if(!navigator.onLine)  return { local, drive:false, motivo:"sin conexión" };
-  const ok = await subeArriendos();
-  /* Un choque no es un éxito: tu cambio NO quedó. Decirlo claro, porque
-     la app ya mostró el aviso para que elijas qué versión conservar. */
-  if(BD.choques.has(S.r.id))
+  /* Guardar es una orden, no una propuesta: si otra persona guardó mientras
+     tanto, se funde con lo suyo y se reintenta en vez de rechazarlo. */
+  BD.forzar = true;
+  let ok;
+  try{ ok = await subeArriendos(); }
+  finally{ BD.forzar = false; }
+  if(S.r && BD.choques.has(S.r.id))
     return { local, drive:false, motivo:"choque" };
   return { local, drive:!!ok, motivo: ok ? "" : (SYNC.error || "falló la subida") };
 }
@@ -1561,6 +1578,7 @@ let BD = {
   equipo: "",             // este dispositivo, para saber quién escribió
   pend: { arriendos:new Set(), vehiculos:new Set(), tareas:new Set() },
   choques: new Set(),     // filas que otra persona guardó después que nosotros
+  forzar: false,          // true mientras corre un guardado explícito
   subiendo: false,
   error: "",
   importado: false,
@@ -1657,9 +1675,10 @@ async function subeABase(){
         if(!raw){ BD.pend.arriendos.delete(id); continue; }
         const r = JSON.parse(raw);
         if(!r.patente && !r.cliente){ BD.pend.arriendos.delete(id); continue; }
+        const {ultimaEtapa, ...compartido} = r;        // la pestaña no se comparte
         filas.push({ id, suc:r.suc, patente:r.patente, cliente:r.cliente, fi:r.fi, ft:r.ft,
                      estado:r.estado, carpeta:nombreCarpeta(r), drive_id:r.driveCarpeta||"",
-                     ver:Number(r.ver)||0, datos:r });
+                     ver:Number(r.ver)||0, datos:compartido });
       }
       if(filas.length) await mandaFilas("arriendos", filas, "id", BD.pend.arriendos);
     }
@@ -1694,21 +1713,82 @@ async function subeABase(){
   }
 }
 
-async function mandaFilas(tabla, filas, llave, pendientes){
+/* Fusión de tres vías para que un guardado explícito nunca sea rechazado
+   y tampoco borre el trabajo ajeno.
+
+     base  = cómo estaba la ficha cuando ESTE equipo la abrió
+     mio   = cómo está ahora aquí
+     suyo  = lo que tiene el servidor
+
+   Regla: si yo cambié un campo, manda el mío; si no lo toqué, se respeta el
+   del servidor. En preparación y revisión se compara casilla por casilla,
+   así dos personas marcando cosas distintas no se pisan.
+   Sin base (la ficha no estaba abierta aquí) gana lo mío, que es lo que
+   significa apretar Guardar. */
+const esMapa = v => v && typeof v==="object" && !Array.isArray(v);
+const igual  = (a,b) => JSON.stringify(a===undefined?null:a) === JSON.stringify(b===undefined?null:b);
+
+function fusionaFicha(base, mio, suyo){
+  const out = { ...(suyo||{}) };
+  for(const k of new Set([...Object.keys(mio||{}), ...Object.keys(suyo||{})])){
+    if(k==="ver" || k==="act" || k==="ultimaEtapa") continue;
+    const b = base ? base[k] : undefined;
+    const m = (mio||{})[k], y = (suyo||{})[k];
+    if(igual(m, b)) continue;                       // yo no lo toqué: queda lo suyo
+    if(esMapa(m) && esMapa(y)){                     // prep, rev, entrega, reporte
+      const mezcla = { ...y };
+      for(const kk of new Set([...Object.keys(m), ...Object.keys(esMapa(b)?b:{})])){
+        const bb = esMapa(b) ? b[kk] : undefined;
+        if(!igual(m[kk], bb)) mezcla[kk] = m[kk];   // solo lo que cambié yo
+      }
+      out[k] = mezcla;
+    }else out[k] = m;
+  }
+  return out;
+}
+
+async function mandaFilas(tabla, filas, llave, pendientes, reintento){
   const d = await api("/db/guardar", { tabla, filas, equipo:nombreEquipo() });
   for(const g of d.guardadas||[]){
     pendientes.delete(g[llave]);
     await anotaVersion(tabla, g[llave], g.ver, g.act);
   }
-  /* Choque: alguien guardó esto mismo después que nosotros. No se pisa
-     ninguna de las dos versiones, se le pregunta a la persona. */
+  /* Choque: alguien guardó esto mismo después que nosotros. */
+  const rehacer = [];
   for(const c of d.choques||[]){
     pendientes.delete(c[llave]);
+    /* Guardado explícito: se funde con lo del servidor y se reintenta una
+       vez. Así apretar Guardar siempre queda, sin borrar lo del otro. */
+    if(tabla==="arriendos" && BD.forzar && !reintento && c.suyo){
+      const mia = filas.find(f=>f[llave]===c[llave]);
+      if(mia){
+        const base = (S.original && S.r && S.r.id===c[llave]) ? JSON.parse(S.original) : null;
+        rehacer.push({ ...mia, ver:c.suyo.ver,
+                       datos: fusionaFicha(base, mia.datos, c.suyo.datos||{}) });
+        continue;
+      }
+    }
     BD.choques.add(c[llave]);
     if(tabla==="arriendos" && c.suyo)
       avisaChoque(c[llave], { ...(c.suyo.datos||{}), ver:c.suyo.ver, act:c.suyo.act });
     else if(c.suyo)
       await anotaVersion(tabla, c[llave], c.suyo.ver, c.suyo.act, c.suyo.datos);
+  }
+  if(rehacer.length){
+    await mandaFilas(tabla, rehacer, llave, pendientes, true);
+    /* La ficha fundida pasa a ser la de este equipo */
+    for(const f of rehacer){
+      const id = f[llave];
+      if(BD.choques.has(id)) continue;                    // el reintento tampoco pudo
+      const guardada = { ...f.datos, id };
+      const previo = await St.get("r:"+id);
+      if(previo){ try{ guardada.ver = JSON.parse(previo).ver; }catch(e){} }
+      await St.set("r:"+id, JSON.stringify(guardada));
+      if(S.r && S.r.id===id){ S.r = { ...guardada, ultimaEtapa:S.etapa }; S.original = JSON.stringify(guardada); }
+      const i = S.indice.findIndex(x=>x.id===id);
+      if(i>=0) S.indice[i] = { ...resumenDe(guardada), ver:S.indice[i].ver, act:S.indice[i].act };
+    }
+    await guardaIndice();
   }
 }
 
@@ -2850,11 +2930,11 @@ document.addEventListener("click", async ev=>{
   const d=t.dataset;
 
   if(d.suc){ S.suc=d.suc; pinta(); return; }
-  if(d.etapa){ if(S.r){ S.r.ultimaEtapa=d.etapa; await guardaFicha(true); } S.etapa=d.etapa; pinta();
+  if(d.etapa){ S.etapa=d.etapa; recuerdaEtapa(); pinta();
     if(S.etapa==="entrega") alistaVideos(); return; }
   if(d.nav){ const i=ETAPAS.findIndex(e=>e.k===S.etapa)+Number(d.nav);
     if(i<0||i>=ETAPAS.length) return;
-    S.etapa=ETAPAS[i].k; S.r.ultimaEtapa=S.etapa; await guardaFicha(true); pinta();
+    S.etapa=ETAPAS[i].k; recuerdaEtapa(); pinta();
     if(S.etapa==="entrega") alistaVideos(); return; }
   if(d.abre){ await abreFicha(d.abre); return; }
   if(d.limpiahuerfana){ cierraModal(); await borraFicha(d.limpiahuerfana);
@@ -2868,7 +2948,7 @@ document.addEventListener("click", async ev=>{
     t.setAttribute("aria-pressed",!!S.r.prep[d.chk]); pintaRail(); pintaPie(); guardaFicha(); return; }
   if(d.vehabrir){ S.veh=d.vehabrir; S.verHist=10; S.vista="vehiculo"; pinta(); bajaFlota(true); return; }
   if(d.tarea){ await cargaFotosTarea(d.tarea); modalTarea(d.tarea); return; }
-  if(d.irA){ cierraModal(); S.etapa=d.irA; S.r.ultimaEtapa=d.irA; await guardaFicha(true); pinta(); return; }
+  if(d.irA){ cierraModal(); S.etapa=d.irA; recuerdaEtapa(); pinta(); return; }
   if(d.tarfoto){ pedirFotoTarea(d.cam); return; }
   if(d.taredel){ const t=buscaTarea(S.tarea);
     if(t){ t.fotos=(t.fotos||[]).filter(f=>f.id!==d.taredel);
