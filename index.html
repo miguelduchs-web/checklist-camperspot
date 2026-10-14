@@ -131,8 +131,9 @@ button.slot.tarea:active{background:var(--salvia-pal)}
 .btn[disabled]{opacity:.45;pointer-events:none}
 .row{display:flex;gap:8px;flex-wrap:wrap}
 .tiras{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-.tira{position:relative;width:88px;height:88px;border-radius:4px;overflow:hidden;border:1px solid var(--linea);background:var(--oliva-osc);padding:0;display:block}
-.tira .txt{position:static;display:flex;align-items:center;justify-content:center;height:100%;color:#C6D4B2;font-size:11px;text-align:center;padding:4px;background:none}
+.tira{position:relative;width:88px;height:88px;border-radius:4px;overflow:hidden;border:1px solid var(--linea);background:var(--oliva-osc,#26380B);padding:0;display:block}
+.tira .txt{position:static;display:flex;align-items:center;justify-content:center;height:100%;color:#C6D4B2;font-size:11px;text-align:center;padding:4px;background:none;
+  text-decoration:none;line-height:1.25}
 .suc-fija{font-family:"Barlow Condensed";font-weight:600;font-size:16px;color:var(--salvia-cl);padding:8px 4px}
 .tira img,.tira video{width:100%;height:100%;object-fit:cover;display:block}
 .tira[data-estado=local]{border-color:var(--alerta);border-style:dashed}
@@ -200,8 +201,19 @@ section.bloque h2.tit{font-size:20px;margin:0 0 2px;display:flex;align-items:cen
 
 /* ---------- modal ---------- */
 .modal{position:fixed;inset:0;background:rgba(26,30,18,.62);display:flex;align-items:flex-end;justify-content:center;z-index:60}
-.modal .box{background:#fff;width:100%;max-width:820px;max-height:88vh;overflow:auto;border-radius:10px 10px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom))}
+/* 820px dejaba los formularios muy estirados en el computador */
+.modal .box{background:#fff;width:100%;max-width:600px;max-height:88vh;overflow:auto;border-radius:10px 10px 0 0;padding:0 16px calc(16px + env(safe-area-inset-bottom))}
 .modal h3{margin:0 0 10px;font-size:21px}
+.volver-modal{position:sticky;top:0;z-index:3;display:block;width:calc(100% + 32px);margin:0 -16px 12px;
+  padding:13px 16px;background:#fff;border:0;border-bottom:1px solid var(--linea);
+  font-family:"Barlow Condensed";font-weight:600;font-size:16px;color:var(--oliva);
+  text-align:left;cursor:pointer}
+.volver-modal:active{background:var(--salvia-pal)}
+/* En pantalla ancha el modal se centra en vez de pegarse abajo */
+@media(min-width:720px){
+  .modal{align-items:center}
+  .modal .box{border-radius:10px;max-height:86vh}
+}
 .ruta{border:1px solid var(--linea);border-radius:4px;background:#FBFCF8;padding:10px;margin-bottom:10px}
 .ruta>span{display:block;font-size:12.5px;color:var(--gris);margin-bottom:5px}
 .ruta code{display:block;font-family:ui-monospace,monospace;font-size:12.5px;word-break:break-all;margin-bottom:8px;color:var(--tinta)}
@@ -1558,7 +1570,11 @@ async function hayBase(){
 
 /* ---------- traer lo que cambió ---------- */
 async function bajaDeBase(silencioso){
-  const d = await api("/db/cambios?desde="+BD.desde);
+  /* Se pide con dos segundos de traslape. Un cambio que ocurra en el mismo
+     milisegundo que la respuesta anterior quedaba justo en el borde y ese
+     dispositivo no lo veía nunca más. Volver a aplicar algo ya aplicado no
+     tiene efecto, así que el traslape sale gratis. */
+  const d = await api("/db/cambios?desde="+Math.max(0, BD.desde - 2000));
   let nuevos = 0;
 
   for(const f of d.arriendos||[]){
@@ -1569,13 +1585,16 @@ async function bajaDeBase(silencioso){
       if(S.r && S.r.id===f.id){ S.r=null; if(S.vista==="ficha") S.vista="inicio"; }
       continue;
     }
+    /* Si aquí hay cambios sin mandar, lo del servidor no se aplica: primero
+       suben los nuestros y el servidor decide con el número de versión.
+       Se miran las dos colas, porque un cambio recién escrito todavía puede
+       estar en la de Drive y no haber pasado a la de la base. */
+    if(BD.pend.arriendos.has(f.id) || SYNC.pendientes.has(f.id)) continue;
     const r = { ...(f.datos||{}), id:f.id, ver:f.ver };
     await St.set("r:"+f.id, JSON.stringify(r));
     const res = { ...resumenDe(r), ver:f.ver, act:f.act };
     if(i<0){ S.indice.unshift(res); nuevos++; } else S.indice[i] = res;
-    /* Si el arriendo abierto cambió en el servidor y aquí no hay nada sin
-       guardar, se refresca. Si hay cambios locales, no se pisan. */
-    if(S.r && S.r.id===f.id && !BD.pend.arriendos.has(f.id)) S.r = r;
+    if(S.r && S.r.id===f.id) S.r = r;
   }
 
   for(const f of d.vehiculos||[]){
@@ -2113,6 +2132,7 @@ function pinta(keep){
       <button class="btn acento" data-act="irInicio" style="width:100%">Volver al inicio</button>`;
   }
   if(keep) window.scrollTo(0,y); else window.scrollTo({top:0});
+  pintaFotosDrive();          // trae las fotos que solo están en Drive
 }
 function pintaRail(){
   document.getElementById("railIn").innerHTML = ETAPAS.map(e=>{
@@ -2392,6 +2412,46 @@ function tareaFila(t){
 const buscaTarea = id => (S.borrador && S.borrador.id===id) ? S.borrador
                        : FLOTA.tareas.find(x=>x.id===id);
 
+/* Fotos que viven en Drive porque se tomaron en otro dispositivo.
+   Se piden al Worker, que las sirve con su propia autenticación, y se
+   quedan en memoria mientras dure la sesión. */
+const FOTOS_DRIVE = {};
+async function fotoDeDrive(driveId){
+  if(!driveId) return "";
+  if(FOTOS_DRIVE[driveId]) return FOTOS_DRIVE[driveId];
+  if(!hayDrive() || !navigator.onLine) return "";
+  try{
+    const r = await fetch(CFG.url.replace(/\/$/,"")+"/archivo?fileId="+encodeURIComponent(driveId),
+                          { headers:{ "x-clave": CFG.clave } });
+    if(!r.ok) return "";
+    return FOTOS_DRIVE[driveId] = URL.createObjectURL(await r.blob());
+  }catch(e){ return ""; }
+}
+
+/* Rellena los huecos sin repintar la pantalla: repintar borraría lo que la
+   persona esté escribiendo. Solo reemplaza el texto de relleno y deja
+   intacto el botón de quitar y el indicador de subida. */
+let PINTANDO_DRIVE = false;
+async function pintaFotosDrive(){
+  if(PINTANDO_DRIVE) return;
+  PINTANDO_DRIVE = true;
+  try{
+    for(const hueco of [...document.querySelectorAll("[data-drivefoto]")]){
+      const src = await fotoDeDrive(hueco.dataset.drivefoto);
+      if(!document.body.contains(hueco)) continue;
+      const relleno = hueco.querySelector(".txt");
+      if(src){
+        const img = document.createElement("img");
+        img.src = src; img.alt = "";
+        if(relleno) relleno.replaceWith(img); else hueco.prepend(img);
+        hueco.removeAttribute("data-drivefoto");
+      }else if(relleno){
+        relleno.innerHTML = "Ver en<br>Drive";   // sin conexión o sin permiso
+      }
+    }
+  }finally{ PINTANDO_DRIVE = false; }
+}
+
 function modalTarea(id){
   const t = buscaTarea(id); if(!t) return;
   const nueva = !!(S.borrador && S.borrador.id===id);
@@ -2399,8 +2459,9 @@ function modalTarea(id){
   const fotos = (t.fotos||[]).map(f=>{
     if(FOTOS[f.id]) return `<div class="tira"><img src="${FOTOS[f.id]}" alt="">
       <button data-taredel="${f.id}" aria-label="Quitar">×</button></div>`;
-    if(f.driveId) return `<a class="tira" href="https://drive.google.com/file/d/${f.driveId}/view"
-      target="_blank" rel="noopener"><em class="txt">Ver en<br>Drive</em></a>`;
+    if(f.driveId) return `<div class="tira" data-drivefoto="${esc(f.driveId)}">
+      <em class="txt">Trayendo…</em>
+      <button data-taredel="${esc(f.id)}" aria-label="Quitar">×</button></div>`;
     return `<div class="tira"><em class="txt">Foto no<br>disponible</em>
       <button data-taredel="${f.id}" aria-label="Quitar">×</button></div>`;
   }).join("");
@@ -2441,6 +2502,7 @@ function modalTarea(id){
             : `<button class="btn ghost" data-act="reabrirTarea" style="flex:1">Reabrir</button>`)
           + `<button class="btn ghost" data-act="borrarTarea">Eliminar</button>`}
     </div>`);
+  pintaFotosDrive();
 }
 
 /* ---------- ficha ---------- */
@@ -2715,15 +2777,19 @@ function slotHTML(s,r){
     <div class="tiras">${ms.map(m=>tiraHTML(m,s.k)).join("")}</div></div>`;
 }
 function tiraHTML(m,slot,danoId){
+  /* Si la foto se tomó en otro dispositivo no está en este disco, pero sí
+     en Drive: se marca el hueco y pintaFotosDrive la trae. */
+  const deDrive = m.tipo==="foto" && !FOTOS[m.id] && m.driveId;
   const cuerpo = m.tipo==="foto"
     ? (FOTOS[m.id] ? `<img src="${FOTOS[m.id]}" alt="">`
-      : m.driveId ? `<em class="txt">Ver en<br>Drive</em>` : `<em class="txt">Foto</em>`)
+      : m.driveId ? `<em class="txt">Trayendo…</em>` : `<em class="txt">Foto</em>`)
     : (THUMBS[m.id] ? `<img src="${THUMBS[m.id]}" alt=""><em>Video</em>` : `<em class="txt">Video</em>`);
   const est = m.estado || (m.driveId ? "listo" : "");
   const marca = est==="listo" ? `<i class="ok">✓</i>`
     : est==="error" ? `<i class="err">!</i>`
     : est ? `<span class="pb-caja"><span class="pb" style="width:${m.pct||0}%"></span></span>` : "";
   return `<button class="tira" data-ver="${m.id}" data-slot="${slot||""}" data-dano="${danoId||""}"
+    ${deDrive?`data-drivefoto="${esc(m.driveId)}"`:""}
     data-estado="${est}" aria-label="Ver ${m.tipo}">${cuerpo}${marca}</button>`;
 }
 
@@ -2734,8 +2800,9 @@ function verMedia(id,slot,danoId){
   const cuerpo = foto ? `<img src="${foto}" alt="" style="width:100%;border-radius:4px;display:block">`
     : THUMBS[id] ? `<img src="${THUMBS[id]}" alt="" style="width:100%;border-radius:4px;display:block">`
     : (m && m.driveId && m.tipo==="foto")
-      ? `<a class="btn wide" style="text-decoration:none" target="_blank" rel="noopener"
-           href="https://drive.google.com/file/d/${m.driveId}/view">Abrir la foto en Drive</a>`
+      ? `<div data-drivefoto="${esc(m.driveId)}" style="min-height:120px;display:flex;
+           align-items:center;justify-content:center;background:var(--oliva-osc,#26380B);border-radius:4px">
+           <em class="txt" style="color:#C6D4B2;font-style:normal;font-size:13px">Trayendo la foto…</em></div>`
       : "";
   const extra = (m && m.driveId && m.tipo==="video")
     ? `<a class="btn wide" style="margin-top:10px;text-decoration:none"
@@ -3119,8 +3186,12 @@ function modalVehiculo(){
   };
 }
 function modal(html){
+  /* El botón de volver queda fijo arriba: en el teléfono el "Cerrar" del
+     final puede quedar fuera de pantalla si el contenido es largo. */
   document.getElementById("modales").innerHTML =
-    `<div class="modal"><div class="box">${html}
+    `<div class="modal"><div class="box">
+      <button class="volver-modal" data-act="cerrarModal" aria-label="Volver">‹ Volver</button>
+      ${html}
       <div class="row" style="margin-top:14px"><button class="btn ghost wide" data-act="cerrarModal">Cerrar</button></div></div></div>`;
 }
 function textoResumen(r){
